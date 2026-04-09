@@ -6,13 +6,14 @@ import os
 import csv
 
 # 页面配置
-st.set_page_config(page_title="快乐8专业数据分析", page_icon="🎰", layout="wide")
+st.set_page_config(page_title="快乐8专业数据分析系统", page_icon="🎰", layout="wide")
 
 # ---------------------- 全局常量 ----------------------
-# 快乐8质数列表（用于质合计算）
-PRIME_NUMBERS = {2,3,5,7,11,13,17,19,23,29,31,37,41,43,47,53,59,61,67,71,73,79}
 DATA_FILE = "kl8_history_data.csv"
+# 1-80质数列表（用于质合计算）
+PRIME_NUMBERS = [2,3,5,7,11,13,17,19,23,29,31,37,41,43,47,53,59,61,67,71,73,79]
 
+# ---------------------- 数据持久化 ----------------------
 # 完整88期初始数据
 INIT_DATA = [
     ["2026001",2,5,6,11,24,25,27,32,34,35,39,41,44,51,54,62,70,71,72,75],
@@ -105,7 +106,7 @@ INIT_DATA = [
     ["2026088",8,9,13,14,18,22,25,33,39,40,44,46,49,55,64,66,68,71,77,80]
 ]
 
-# ---------------------- 数据持久化函数 ----------------------
+# 加载数据
 def load_data():
     if not os.path.exists(DATA_FILE):
         with open(DATA_FILE, 'w', newline='', encoding='utf-8') as f:
@@ -116,6 +117,7 @@ def load_data():
     df = df.sort_values('period', ascending=False).reset_index(drop=True)
     return df
 
+# 保存新数据
 def save_new_data(period, numbers):
     numbers = sorted(numbers)
     with open(DATA_FILE, 'a', newline='', encoding='utf-8') as f:
@@ -123,7 +125,7 @@ def save_new_data(period, numbers):
         writer.writerow([period] + numbers)
     return True
 
-# ---------------------- 基础分析函数 ----------------------
+# ---------------------- 核心分析函数 ----------------------
 def analyze_data(df, window=None):
     if window:
         data = df.head(window).copy()
@@ -222,35 +224,54 @@ def analyze_data(df, window=None):
     }
 
 # ---------------------- 新增：深度复盘分析函数 ----------------------
-def generate_deep_review(period, numbers, prev_numbers=None, df=None):
+def generate_deep_review(numbers, prev_numbers=None, period="未知期号"):
     """生成单期深度复盘报告"""
     numbers = sorted(numbers)
     review = {}
     
-    # 1. 基础指标
+    # 1. 基础信息
+    review['period'] = period
+    review['numbers'] = numbers
+    review['numbers_str'] = "、".join([f"{n:02d}" for n in numbers])
+    
+    # 2. 核心指标计算
+    # 奇偶
     odd = len([n for n in numbers if n%2==1])
     even = 20 - odd
+    review['odd'] = odd
+    review['even'] = even
+    review['odd_even_ratio'] = f"{odd}:{even}"
+    review['odd_even_diff'] = even - odd
+    
+    # 大小
     small = len([n for n in numbers if n<=40])
     large = 20 - small
+    review['small'] = small
+    review['large'] = large
+    review['size_ratio'] = f"{small}:{large}"
+    
+    # 012路
     road0 = len([n for n in numbers if n%3==0])
     road1 = len([n for n in numbers if n%3==1])
     road2 = len([n for n in numbers if n%3==2])
+    review['road0'] = road0
+    review['road1'] = road1
+    review['road2'] = road2
+    review['road_ratio'] = f"{road0}:{road1}:{road2}"
+    
+    # 质合
     prime = len([n for n in numbers if n in PRIME_NUMBERS])
     composite = 20 - prime
-    sum_val = sum(numbers)
-    span = numbers[-1] - numbers[0]
+    review['prime'] = prime
+    review['composite'] = composite
+    review['prime_composite_ratio'] = f"{prime}:{composite}"
     
-    review['basic'] = {
-        'period': period,
-        'numbers': numbers,
-        'odd': odd, 'even': even,
-        'small': small, 'large': large,
-        'road0': road0, 'road1': road1, 'road2': road2,
-        'prime': prime, 'composite': composite,
-        'sum': sum_val, 'span': span
-    }
+    # 和值与跨度
+    review['sum'] = sum(numbers)
+    review['span'] = numbers[-1] - numbers[0]
     
-    # 2. 连号
+    # 3. 号码结构
+    # 连号
     consecutive = []
     i = 0
     while i < 19:
@@ -262,51 +283,62 @@ def generate_deep_review(period, numbers, prev_numbers=None, df=None):
             consecutive.append(f"{start}-{end}")
         i +=1
     review['consecutive'] = consecutive
+    review['consecutive_count'] = len(consecutive)
     
-    # 3. 重号和斜连号（如果有上一期数据）
-    if prev_numbers is not None:
-        prev_numbers = sorted(prev_numbers)
+    # 重号（需要上期号码）
+    if prev_numbers:
         repeat = [n for n in numbers if n in prev_numbers]
-        oblique = [n for n in numbers if (n-1 in prev_numbers) or (n+1 in prev_numbers)]
         review['repeat'] = repeat
+        review['repeat_count'] = len(repeat)
+    else:
+        review['repeat'] = []
+        review['repeat_count'] = 0
+    
+    # 斜连号（需要上期号码）
+    if prev_numbers:
+        oblique = []
+        for n in numbers:
+            if (n-1 in prev_numbers) or (n+1 in prev_numbers):
+                oblique.append(n)
         review['oblique'] = oblique
+        review['oblique_count'] = len(oblique)
+    else:
+        review['oblique'] = []
+        review['oblique_count'] = 0
     
-    # 4. 同尾号
+    # 同尾号
     tail_counter = Counter([n%10 for n in numbers])
-    tail_groups = defaultdict(list)
-    for n in numbers:
-        tail_groups[n%10].append(n)
-    review['tails'] = tail_groups
+    same_tail = {}
+    for tail, cnt in tail_counter.items():
+        if cnt >=2:
+            same_tail[tail] = [n for n in numbers if n%10 == tail]
+    review['same_tail'] = same_tail
+    review['same_tail_count'] = len(same_tail)
     
-    # 5. 区间分布
+    # 区间分布
     zone1 = len([n for n in numbers if 1<=n<=20])
     zone2 = len([n for n in numbers if 21<=n<=40])
     zone3 = len([n for n in numbers if 41<=n<=60])
     zone4 = len([n for n in numbers if 61<=n<=80])
-    review['zones'] = [zone1, zone2, zone3, zone4]
-    
-    # 6. 冷热遗漏（如果有全量数据）
-    if df is not None:
-        res = analyze_data(df, 50)
-        hot_nums = [x[0] for x in res['hot'][:20]]
-        cold_nums = res['miss_df'][res['miss_df']['当前遗漏']>=8]['号码'].tolist()
-        hot_hit = [n for n in numbers if n in hot_nums]
-        cold_hit = [n for n in numbers if n in cold_nums]
-        review['hot_hit'] = hot_hit
-        review['cold_hit'] = cold_hit
+    review['zone1'] = zone1
+    review['zone2'] = zone2
+    review['zone3'] = zone3
+    review['zone4'] = zone4
+    review['zone_ratio'] = f"{zone1}:{zone2}:{zone3}:{zone4}"
     
     return review
 
-# ---------------------- 页面布局 ----------------------
+# ---------------------- 界面布局 ----------------------
 df = load_data()
 total_periods = len(df)
 
+# 新增第5个标签页：深度复盘
 tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "🏠 首页说明", 
     "📋 号码库管理", 
     "📊 多周期分析", 
     "🔮 选号参考",
-    "📝 单期深度复盘"  # 新增复盘标签页
+    "📝 单期深度复盘"  # 新增模块
 ])
 
 with tab1:
@@ -325,7 +357,7 @@ with tab1:
     2. 多周期分析：支持近10/20/50/100期/全量数据的多维度分析
     3. 全维度指标：冷热号、遗漏值、相随号、跟随号、012路、连号统计
     4. 选号参考：提供娱乐性的选号思路与参考号码
-    5. 单期深度复盘：输入号码自动生成全维度拆解报告
+    5. 单期深度复盘：输入期号或号码，自动生成全维度深度复盘报告
     """)
 
 with tab2:
@@ -523,25 +555,25 @@ with tab4:
         st.success(f"参考号码：{' '.join([f'{n:02d}' for n in ref_nums])}")
         st.caption("再次提醒：这只是基于历史数据的随机参考，完全不代表会开出这些号码！")
 
-# ---------------------- 新增：单期深度复盘页面 ----------------------
+# ---------------------- 新增：深度复盘模块 ----------------------
 with tab5:
     st.header("📝 单期深度复盘")
-    st.info("支持选择历史期号一键复盘，或手动输入新期号码生成复盘")
+    st.info("支持选择历史期号一键复盘，或手动输入新期号码实时生成复盘报告")
     
     # 选择复盘方式
-    review_mode = st.radio("选择复盘方式", ["选择历史期号复盘", "手动输入新期号码复盘"])
+    review_mode = st.radio("选择复盘方式", ["选择历史期号", "手动输入新期号码"], horizontal=True)
     
-    if review_mode == "选择历史期号复盘":
-        # 历史期号选择
+    if review_mode == "选择历史期号":
+        # 历史期号选择器
         period_list = df['period'].tolist()
         selected_period = st.selectbox("选择要复盘的期号", period_list)
         
         if st.button("生成复盘报告", type="primary"):
-            # 获取当期和上一期数据
+            # 获取当期和上期号码
             current_row = df[df['period'] == selected_period].iloc[0]
             current_nums = current_row[1:].tolist()
             
-            # 获取上一期数据
+            # 获取上期号码
             current_idx = df[df['period'] == selected_period].index[0]
             prev_nums = None
             if current_idx < len(df)-1:
@@ -549,150 +581,129 @@ with tab5:
                 prev_nums = prev_row[1:].tolist()
             
             # 生成复盘
-            review = generate_deep_review(selected_period, current_nums, prev_nums, df)
+            review = generate_deep_review(current_nums, prev_nums, selected_period)
             
-            # 显示复盘报告
+            # 展示复盘报告（完全复刻你要求的格式）
             st.divider()
-            st.subheader(f"福彩快乐8 {selected_period}期 深度拆解复盘")
-            st.write(f"**官方开奖号码（升序）**：{' '.join([f'{n:02d}' for n in review['basic']['numbers']])}")
+            st.subheader(f"福彩快乐8 {review['period']}期 深度复盘报告")
             
-            # 核心指标表格
-            st.subheader("一、核心基础指标精准拆解")
-            basic_df = pd.DataFrame({
-                '指标': ['奇偶比', '大小比', '012路比', '质合比', '和值', '跨度', '连号组数', '重号数量'],
-                '本期结果': [
-                    f"{review['basic']['odd']}:{review['basic']['even']}",
-                    f"{review['basic']['small']}:{review['basic']['large']}",
-                    f"{review['basic']['road0']}:{review['basic']['road1']}:{review['basic']['road2']}",
-                    f"{review['basic']['prime']}:{review['basic']['composite']}",
-                    review['basic']['sum'],
-                    review['basic']['span'],
-                    len(review['consecutive']),
-                    len(review.get('repeat', []))
-                ],
-                '理论均值': ['10:10', '10:10', '7:7:6', '6:14', '810', '60', '4.2组', '3.5个']
-            })
-            st.dataframe(basic_df, hide_index=True, use_container_width=True)
+            # 一、开奖号码
+            st.markdown("### 一、官方开奖号码")
+            st.success(f"**开奖号码（升序）**：{review['numbers_str']}")
             
-            # 奇偶分布
-            st.subheader("二、奇偶分布深度拆解")
-            odd_nums = [n for n in review['basic']['numbers'] if n%2==1]
-            even_nums = [n for n in review['basic']['numbers'] if n%2==0]
-            st.write(f"- **奇数（{review['basic']['odd']}个）**：{' '.join([f'{n:02d}' for n in odd_nums])}")
-            st.write(f"- **偶数（{review['basic']['even']}个）**：{' '.join([f'{n:02d}' for n in even_nums])}")
-            if abs(review['basic']['odd'] - review['basic']['even']) <= 2:
-                st.success(f"✅ 本期为极致弱偏态，{'偶数仅比奇数多出' if review['basic']['even']>review['basic']['odd'] else '奇数仅比偶数多出'}{abs(review['basic']['odd']-review['basic']['even'])}个")
+            # 二、核心指标汇总
+            st.markdown("### 二、核心基础指标汇总")
+            metrics_df = pd.DataFrame([
+                ["奇偶比", review['odd_even_ratio'], "10:10", f"偶数仅比奇数多出{review['odd_even_diff']}个" if review['odd_even_diff']>0 else f"奇数仅比偶数多出{abs(review['odd_even_diff'])}个"],
+                ["大小比", review['size_ratio'], "10:10", "完全均衡" if review['small']==review['large'] else "微偏"],
+                ["012路比", review['road_ratio'], "7:7:6", "整体均衡"],
+                ["质合比", review['prime_composite_ratio'], "6:14", "合数热开" if review['composite']>14 else "质数热开"],
+                ["和值", review['sum'], "810", "常规区间"],
+                ["跨度", review['span'], "60", "覆盖全区间"],
+                ["连号组数", review['consecutive_count'], "4.2", "连号退潮" if review['consecutive_count']<3 else "连号活跃"],
+                ["重号数量", review['repeat_count'], "3.5", "重号活跃" if review['repeat_count']>4 else "正常"]
+            ], columns=["指标", "本期结果", "理论均值", "核心定性"])
+            st.dataframe(metrics_df, hide_index=True, use_container_width=True)
             
-            # 区间分布
-            st.subheader("三、区间分布拆解")
-            z1,z2,z3,z4 = review['zones']
-            st.write(f"- 01-20区：{z1}个")
-            st.write(f"- 21-40区：{z2}个")
-            st.write(f"- 41-60区：{z3}个")
-            st.write(f"- 61-80区：{z4}个")
+            # 三、奇偶分布深度拆解
+            st.markdown("### 三、核心特征：奇偶分布深度拆解")
+            st.markdown(f"- **奇数号码（{review['odd']}个）**：{'、'.join([f'{n:02d}' for n in review['numbers'] if n%2==1])}")
+            st.markdown(f"- **偶数号码（{review['even']}个）**：{'、'.join([f'{n:02d}' for n in review['numbers'] if n%2==0])}")
+            if review['odd_even_diff'] == 2:
+                st.markdown(f"✅ **核心特征**：**偶数仅比奇数多出2个**，属于极致弱偏态，无限贴近理论均衡值")
+            elif review['odd_even_diff'] == -2:
+                st.markdown(f"✅ **核心特征**：**奇数仅比偶数多出2个**，属于极致弱偏态，无限贴近理论均衡值")
+            else:
+                st.markdown(f"- 奇偶差值：{abs(review['odd_even_diff'])}个")
             
-            # 号码结构
-            st.subheader("四、号码结构深度拆解")
-            st.write(f"- **连号**：{len(review['consecutive'])}组 → {'、'.join(review['consecutive']) if review['consecutive'] else '无'}")
-            if 'repeat' in review:
-                st.write(f"- **重号（与上期）**：{len(review['repeat'])}个 → {' '.join([f'{n:02d}' for n in review['repeat']]) if review['repeat'] else '无'}")
-            if 'oblique' in review:
-                st.write(f"- **斜连号（与上期）**：{len(review['oblique'])}个 → {' '.join([f'{n:02d}' for n in review['oblique']]) if review['oblique'] else '无'}")
+            # 四、区间分布
+            st.markdown("### 四、区间分布拆解")
+            col_z1, col_z2, col_z3, col_z4 = st.columns(4)
+            with col_z1:
+                st.metric("01-20区", f"{review['zone1']}个")
+            with col_z2:
+                st.metric("21-40区", f"{review['zone2']}个")
+            with col_z3:
+                st.metric("41-60区", f"{review['zone3']}个")
+            with col_z4:
+                st.metric("61-80区", f"{review['zone4']}个")
             
-            # 同尾号
-            st.write("- **同尾号**：")
-            for tail, nums in review['tails'].items():
-                if len(nums)>=2:
-                    st.write(f"  - 尾{tail}：{' '.join([f'{n:02d}' for n in nums])}（{len(nums)}个）")
+            # 五、号码结构
+            st.markdown("### 五、号码结构深度拆解")
+            col_s1, col_s2 = st.columns(2)
+            with col_s1:
+                st.markdown(f"- **连号**：{review['consecutive'] if review['consecutive'] else '无'}")
+                st.markdown(f"- **重号（与上期）**：{review['repeat'] if review['repeat'] else '无'}（共{review['repeat_count']}个）")
+            with col_s2:
+                st.markdown(f"- **斜连号（与上期）**：{review['oblique'] if review['oblique'] else '无'}（共{review['oblique_count']}个）")
+                st.markdown(f"- **同尾号**：{review['same_tail'] if review['same_tail'] else '无'}（共{review['same_tail_count']}组）")
             
-            # 冷热命中
-            if 'hot_hit' in review and 'cold_hit' in review:
-                st.subheader("五、冷热号命中拆解")
-                st.write(f"- **热号命中（近50期TOP20）**：{len(review['hot_hit'])}个 → {' '.join([f'{n:02d}' for n in review['hot_hit']])}")
-                st.write(f"- **冷号命中（遗漏≥8期）**：{len(review['cold_hit'])}个 → {' '.join([f'{n:02d}' for n in review['cold_hit']])}")
-            
-            # 总结
-            st.subheader("六、本期复盘核心总结")
-            summary = []
-            if abs(review['basic']['odd'] - review['basic']['even']) <= 2 and review['basic']['small'] == review['basic']['large']:
-                summary.append("本期为极致均衡弱偏态走势，大小号完全均分，奇偶仅微弱偏离")
-            if review['basic']['prime'] <= 3:
-                summary.append(f"质合比{review['basic']['prime']}:{review['basic']['composite']}，合数极端热开，是本期唯一极端偏态")
-            if len(review['consecutive']) <= 2:
-                summary.append("连号大幅退潮，号码分散度高")
-            if len(review.get('repeat', [])) >= 4:
-                summary.append("重号异常活跃，延续近期趋势")
-            
-            for s in summary:
-                st.write(f"- {s}")
+            # 六、总结
+            st.markdown("### 六、本期复盘总结")
+            st.markdown(f"""
+            1.  本期核心特征：**{review['odd_even_ratio']}的奇偶比**，{f"偶数仅比奇数多出{review['odd_even_diff']}个" if review['odd_even_diff']>0 else f"奇数仅比偶数多出{abs(review['odd_even_diff'])}个"}，整体走势均衡
+            2.  大小比{review['size_ratio']}，{'完全均分' if review['small']==review['large'] else '微偏'}
+            3.  连号数量{review['consecutive_count']}组，{'低于历史均值' if review['consecutive_count']<4 else '高于历史均值'}
+            4.  重号数量{review['repeat_count']}个，{'重号活跃' if review['repeat_count']>3 else '重号正常'}
+            """)
             
             st.caption("以上仅为历史数据复盘，不构成任何购彩建议")
     
     else:
-        # 手动输入新期复盘
+        # 手动输入新期号码
         with st.form("manual_review_form"):
-            col1, col2 = st.columns(2)
-            with col1:
-                new_period = st.text_input("期号（如：2026089）", placeholder="例如：2026089")
-            with col2:
-                nums_input = st.text_input("开奖号码（20个数字，空格分隔）", placeholder="例如：08 09 13 14 ... 80")
+            new_period = st.text_input("期号（如：2026089）", placeholder="例如：2026089")
+            nums_input = st.text_input("开奖号码（20个数字，空格分隔）", placeholder="例如：08 09 13 14 ... 80")
+            submit_review = st.form_submit_button("生成复盘报告")
             
-            submit_review = st.form_submit_button("生成复盘报告", type="primary")
-        
-        if submit_review:
-            try:
-                nums = list(map(int, nums_input.strip().split()))
-                if len(nums) !=20:
-                    st.error("必须输入20个号码！")
-                else:
-                    # 获取上一期数据（数据库最新一期）
-                    prev_nums = df.iloc[0][1:].tolist() if total_periods>0 else None
-                    
-                    # 生成复盘
-                    review = generate_deep_review(new_period, nums, prev_nums, df)
-                    
-                    # 显示复盘报告（和上面完全一样）
-                    st.divider()
-                    st.subheader(f"福彩快乐8 {new_period}期 深度拆解复盘")
-                    st.write(f"**官方开奖号码（升序）**：{' '.join([f'{n:02d}' for n in sorted(nums)])}")
-                    
-                    # 核心指标表格
-                    st.subheader("一、核心基础指标精准拆解")
-                    basic_df = pd.DataFrame({
-                        '指标': ['奇偶比', '大小比', '012路比', '质合比', '和值', '跨度', '连号组数', '重号数量'],
-                        '本期结果': [
-                            f"{review['basic']['odd']}:{review['basic']['even']}",
-                            f"{review['basic']['small']}:{review['basic']['large']}",
-                            f"{review['basic']['road0']}:{review['basic']['road1']}:{review['basic']['road2']}",
-                            f"{review['basic']['prime']}:{review['basic']['composite']}",
-                            review['basic']['sum'],
-                            review['basic']['span'],
-                            len(review['consecutive']),
-                            len(review.get('repeat', []))
-                        ],
-                        '理论均值': ['10:10', '10:10', '7:7:6', '6:14', '810', '60', '4.2组', '3.5个']
-                    })
-                    st.dataframe(basic_df, hide_index=True, use_container_width=True)
-                    
-                    # 奇偶分布
-                    st.subheader("二、奇偶分布深度拆解")
-                    odd_nums = [n for n in review['basic']['numbers'] if n%2==1]
-                    even_nums = [n for n in review['basic']['numbers'] if n%2==0]
-                    st.write(f"- **奇数（{review['basic']['odd']}个）**：{' '.join([f'{n:02d}' for n in odd_nums])}")
-                    st.write(f"- **偶数（{review['basic']['even']}个）**：{' '.join([f'{n:02d}' for n in even_nums])}")
-                    if abs(review['basic']['odd'] - review['basic']['even']) <= 2:
-                        st.success(f"✅ 本期为极致弱偏态，{'偶数仅比奇数多出' if review['basic']['even']>review['basic']['odd'] else '奇数仅比偶数多出'}{abs(review['basic']['odd']-review['basic']['even'])}个")
-                    
-                    # 区间分布
-                    st.subheader("三、区间分布拆解")
-                    z1,z2,z3,z4 = review['zones']
-                    st.write(f"- 01-20区：{z1}个")
-                    st.write(f"- 21-40区：{z2}个")
-                    st.write(f"- 41-60区：{z3}个")
-                    st.write(f"- 61-80区：{z4}个")
-                    
-                    # 号码结构
-                    st.subheader("四、号码结构深度拆解")
-                    st.write(f"- **连号**：{len(review['consecutive'])}组 → {'、'.join(review['consecutive']) if review['consecutive'] else '无'}")
-                    if 'repeat' in review:
-                        st.write(f"- **重号（与上期）**：{len(review['repeat'])}
+            if submit_review:
+                try:
+                    nums = [int(x) for x in nums_input.strip().split()]
+                    if len(nums) !=20:
+                        st.error("必须输入20个号码！")
+                    elif len(set(nums)) !=20:
+                        st.error("号码不能重复！")
+                    elif max(nums)>80 or min(nums)<1:
+                        st.error("号码必须在1-80之间！")
+                    else:
+                        # 获取上期号码（最新一期）
+                        prev_nums = df.iloc[0][1:].tolist() if total_periods>0 else None
+                        
+                        # 生成复盘
+                        review = generate_deep_review(nums, prev_nums, new_period)
+                        
+                        # 展示复盘报告
+                        st.divider()
+                        st.subheader(f"福彩快乐8 {review['period']}期 深度复盘报告")
+                        
+                        # 一、开奖号码
+                        st.markdown("### 一、开奖号码")
+                        st.success(f"**开奖号码（升序）**：{review['numbers_str']}")
+                        
+                        # 二、核心指标汇总
+                        st.markdown("### 二、核心基础指标汇总")
+                        metrics_df = pd.DataFrame([
+                            ["奇偶比", review['odd_even_ratio'], "10:10", f"偶数仅比奇数多出{review['odd_even_diff']}个" if review['odd_even_diff']>0 else f"奇数仅比偶数多出{abs(review['odd_even_diff'])}个"],
+                            ["大小比", review['size_ratio'], "10:10", "完全均衡" if review['small']==review['large'] else "微偏"],
+                            ["012路比", review['road_ratio'], "7:7:6", "整体均衡"],
+                            ["质合比", review['prime_composite_ratio'], "6:14", "合数热开" if review['composite']>14 else "质数热开"],
+                            ["和值", review['sum'], "810", "常规区间"],
+                            ["跨度", review['span'], "60", "覆盖全区间"],
+                            ["连号组数", review['consecutive_count'], "4.2", "连号退潮" if review['consecutive_count']<3 else "连号活跃"],
+                            ["重号数量", review['repeat_count'], "3.5", "重号活跃" if review['repeat_count']>4 else "正常"]
+                        ], columns=["指标", "本期结果", "理论均值", "核心定性"])
+                        st.dataframe(metrics_df, hide_index=True, use_container_width=True)
+                        
+                        # 三、奇偶分布深度拆解
+                        st.markdown("### 三、核心特征：奇偶分布深度拆解")
+                        st.markdown(f"- **奇数号码（{review['odd']}个）**：{'、'.join([f'{n:02d}' for n in review['numbers'] if n%2==1])}")
+                        st.markdown(f"- **偶数号码（{review['even']}个）**：{'、'.join([f'{n:02d}' for n in review['numbers'] if n%2==0])}")
+                        if review['odd_even_diff'] == 2:
+                            st.markdown(f"✅ **核心特征**：**偶数仅比奇数多出2个**，属于极致弱偏态，无限贴近理论均衡值")
+                        elif review['odd_even_diff'] == -2:
+                            st.markdown(f"✅ **核心特征**：**奇数仅比偶数多出2个**，属于极致弱偏态，无限贴近理论均衡值")
+                        else:
+                            st.markdown(f"- 奇偶差值：{abs(review['odd_even_diff'])}个")
+                        
+                        # 四、区间分布
+  
