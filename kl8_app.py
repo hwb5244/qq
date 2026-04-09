@@ -1,79 +1,339 @@
-# 带永久数据存储的公网版本代码
 import streamlit as st
 import pandas as pd
-import matplotlib.pyplot as plt
 import numpy as np
 from collections import Counter, defaultdict
 import os
 import csv
-import requests
 
 # 页面配置
 st.set_page_config(page_title="快乐8专业数据分析", page_icon="🎰", layout="wide")
-plt.rcParams['font.sans-serif'] = ['SimHei']
-plt.rcParams['axes.unicode_minus'] = False
 
-# ---------------------- 永久数据存储：用GitHub Gist ----------------------
-# 你需要在这里替换成你自己的Gist信息，步骤：
-# 1. 打开https://gist.github.com/ 新建一个公开的Gist，文件名叫kl8_data.csv
-# 2. 把下面的GIST_ID和GIST_TOKEN替换成你的
-GIST_ID = "你的Gist的ID"
-GIST_TOKEN = "你的GitHub的Personal Access Token"
+# ---------------------- 数据持久化 ----------------------
 DATA_FILE = "kl8_history_data.csv"
 
-# 完整的88期初始数据
+# 完整88期数据
 INIT_DATA = [
     ["2026001",2,5,6,11,24,25,27,32,34,35,39,41,44,51,54,62,70,71,72,75],
-    # ... 这里是完整的88期数据，和之前的一样，你复制的时候把完整的带过来就行
+    ["2026002",3,8,10,17,22,24,25,28,39,51,61,62,67,69,70,71,72,73,74,80],
+    ["2026003",2,7,14,16,22,25,28,31,39,42,47,53,54,55,61,68,69,72,73,78],
+    ["2026004",4,5,9,13,16,21,23,24,32,35,37,38,45,50,52,54,55,62,63,64],
+    ["2026005",7,8,9,14,18,21,24,26,33,35,41,43,49,54,56,59,60,63,68,76],
+    ["2026006",3,5,7,9,19,28,30,32,34,38,49,52,56,61,62,66,73,76,78,79],
+    ["2026007",3,13,15,18,20,21,25,32,42,43,45,54,57,62,63,68,72,74,76,80],
+    ["2026008",2,4,15,20,21,23,24,34,47,50,51,52,57,58,60,61,66,71,77,79],
+    ["2026009",3,4,8,17,18,31,34,37,42,46,47,55,56,61,65,70,74,75,76,80],
+    ["2026010",6,7,13,16,19,27,33,37,39,42,43,44,55,59,62,64,65,67,76,80],
+    ["2026011",1,3,12,16,22,25,27,30,32,49,52,56,59,61,62,63,66,68,69,79],
+    ["2026012",4,11,12,15,16,20,21,26,27,28,30,32,33,41,53,60,62,64,65,76],
+    ["2026013",1,5,9,10,11,12,14,15,16,22,28,32,37,41,44,64,72,77,78,80],
+    ["2026014",6,12,13,14,18,24,28,29,30,34,38,43,49,52,59,60,64,74,78,80],
+    ["2026015",2,8,9,11,14,17,18,19,27,29,31,34,36,41,55,60,64,70,72,79],
+    ["2026016",4,19,24,27,28,35,36,38,39,45,50,56,58,59,60,61,64,66,73,78],
+    ["2026017",11,15,28,33,36,37,38,46,47,50,51,52,61,62,63,67,68,71,73,80],
+    ["2026018",11,12,14,15,18,21,22,23,29,32,33,35,40,41,55,65,69,74,75,78],
+    ["2026019",16,20,21,23,24,37,48,51,52,53,54,59,60,62,66,68,75,76,77,78],
+    ["2026020",7,13,18,22,24,30,32,33,37,43,47,48,52,62,63,67,69,73,78,79],
+    ["2026021",4,5,6,9,10,11,14,19,21,31,34,43,45,48,51,53,56,60,65,70],
+    ["2026022",2,9,10,11,15,16,17,18,28,33,35,43,54,55,60,61,63,65,68,73],
+    ["2026023",9,13,17,27,28,31,36,39,42,45,50,55,57,61,67,68,73,74,75,79],
+    ["2026024",3,8,16,19,22,25,28,35,36,37,49,50,52,54,57,58,64,67,71,73],
+    ["2026025",2,3,4,6,8,13,17,20,21,25,26,29,34,40,47,49,51,58,59,69],
+    ["2026026",2,6,14,17,21,22,26,34,35,36,48,51,52,58,60,62,71,73,75,76],
+    ["2026027",1,4,7,14,18,26,28,37,38,49,51,58,61,62,64,67,71,75,76,79],
+    ["2026028",9,11,14,16,17,20,28,30,32,33,46,51,54,57,58,62,66,68,71,74],
+    ["2026029",1,4,11,15,19,27,29,31,33,39,43,45,52,58,65,67,69,73,75,77],
+    ["2026030",2,8,12,13,14,16,23,31,37,39,44,46,50,54,55,59,61,69,70,73],
+    ["2026031",8,10,15,22,25,26,35,42,43,45,47,52,56,57,62,63,72,76,78,80],
+    ["2026032",2,4,9,22,24,26,27,28,31,34,36,39,43,44,53,55,59,62,65,70],
+    ["2026033",2,3,8,10,16,19,20,21,29,30,33,34,36,48,53,54,55,58,59,76],
+    ["2026034",4,6,19,25,26,29,30,31,32,43,44,48,50,62,65,66,68,71,72,80],
+    ["2026035",5,7,18,19,23,24,29,32,34,47,48,53,57,62,64,65,70,72,77,80],
+    ["2026036",3,11,19,27,32,33,35,38,43,46,49,50,63,64,66,67,74,75,76,77],
+    ["2026037",6,7,8,17,24,25,27,28,29,34,40,41,49,53,57,58,60,67,69,72],
+    ["2026038",3,4,5,6,7,9,11,20,21,26,36,44,46,47,54,68,73,74,75,80],
+    ["2026039",3,5,13,17,22,27,36,38,40,43,49,50,51,61,62,64,68,73,78,80],
+    ["2026040",12,13,16,24,31,32,35,37,41,43,48,50,51,55,64,66,68,73,76,79],
+    ["2026041",8,12,17,18,23,24,25,26,27,28,30,31,38,41,46,56,66,68,69,79],
+    ["2026042",2,8,14,15,16,17,25,34,37,41,47,52,56,60,62,63,72,74,77,79],
+    ["2026043",1,6,12,15,16,19,22,23,25,28,32,34,35,36,41,48,56,64,65,77],
+    ["2026044",1,3,8,9,13,16,19,23,33,43,47,49,52,53,55,60,68,74,76,79],
+    ["2026045",2,3,5,9,11,12,13,18,19,25,35,38,45,57,61,65,68,70,72,76],
+    ["2026046",1,10,13,14,15,23,25,26,28,48,49,50,52,54,59,61,64,69,70,79],
+    ["2026047",5,14,16,21,22,28,31,34,37,40,50,51,55,62,63,64,74,75,77,80],
+    ["2026048",3,4,10,12,16,17,21,25,33,35,41,43,49,50,60,65,69,75,76,80],
+    ["2026049",1,6,7,8,11,17,28,35,36,39,41,42,44,48,53,60,61,69,72,75],
+    ["2026050",12,14,25,34,39,41,43,45,46,49,51,57,58,60,62,64,65,66,72,74],
+    ["2026051",6,7,9,20,21,28,31,32,33,34,36,39,41,47,56,62,67,70,71,77],
+    ["2026052",2,6,11,13,19,23,27,29,32,34,40,45,49,51,56,59,66,69,74,80],
+    ["2026053",2,3,7,14,20,22,23,25,26,27,28,30,35,36,38,41,44,63,67,68],
+    ["2026054",2,8,11,14,15,18,21,23,39,40,42,43,44,51,55,60,65,71,79,80],
+    ["2026055",3,4,8,10,12,16,19,22,24,26,31,49,54,55,58,63,64,67,75,79],
+    ["2026056",1,8,14,16,25,39,40,48,50,51,56,58,65,67,69,71,73,74,75,79],
+    ["2026057",4,8,12,13,17,21,26,27,30,31,35,38,43,50,52,57,60,72,79,80],
+    ["2026058",3,5,8,17,19,20,21,27,29,42,47,49,51,53,62,66,69,71,74,80],
+    ["2026059",3,10,18,22,24,26,28,30,37,41,46,47,48,51,57,63,69,70,75,76],
+    ["2026060",2,3,4,14,15,19,25,28,32,38,39,40,42,45,48,60,61,63,65,67],
+    ["2026061",4,5,6,7,13,18,20,21,28,32,34,39,40,42,44,47,50,56,75,76],
+    ["2026062",3,4,5,7,14,16,22,27,38,43,46,48,56,58,68,71,73,77,79,80],
+    ["2026063",2,4,8,9,14,30,33,35,37,38,40,47,52,59,62,65,73,75,76,79],
+    ["2026064",13,16,21,25,31,32,38,45,49,57,58,59,61,63,67,69,72,75,77,78],
+    ["2026065",1,2,4,7,9,11,14,16,24,32,34,37,48,49,50,52,53,59,63,70],
+    ["2026066",2,3,4,6,8,17,20,27,30,37,41,43,54,56,57,58,60,63,65,69],
+    ["2026067",10,11,12,13,14,16,19,23,24,26,39,42,43,50,53,61,62,66,75,80],
+    ["2026068",1,4,10,18,19,20,22,31,35,36,44,49,50,52,61,67,68,74,75,78],
+    ["2026069",1,5,6,9,15,19,21,25,31,40,47,50,54,56,59,62,65,67,72,80],
+    ["2026070",1,3,4,7,11,19,25,27,37,38,42,45,46,48,54,56,69,72,76,77],
+    ["2026071",2,3,8,12,13,14,15,21,25,29,42,44,45,46,47,48,52,58,63,66],
+    ["2026072",1,5,19,22,28,30,34,37,38,40,41,44,48,50,51,54,59,74,75,80],
+    ["2026073",2,3,6,8,9,20,26,27,29,35,52,57,64,67,73,74,75,76,79,80],
+    ["2026074",2,5,7,8,11,13,15,16,20,31,32,33,41,43,52,62,70,71,72,73],
+    ["2026075",1,4,17,18,21,22,23,24,25,30,41,47,48,50,54,55,56,57,62,78],
+    ["2026076",6,10,12,14,16,21,24,38,39,40,46,48,52,58,61,69,71,74,75,77],
+    ["2026077",3,6,19,21,24,32,36,37,44,45,51,55,58,61,62,66,71,73,74,75],
+    ["2026078",1,6,7,11,15,21,24,27,31,32,34,38,46,49,52,60,67,71,73,74],
+    ["2026079",4,10,12,23,38,39,41,44,45,50,51,55,57,60,64,66,68,73,75,76],
+    ["2026080",7,11,14,24,25,27,32,33,34,46,49,52,54,56,59,60,61,66,69,72],
+    ["2026081",1,2,8,9,11,12,20,32,34,39,42,43,53,54,55,58,59,63,66,77],
+    ["2026082",2,5,11,16,23,25,26,29,33,39,57,62,64,68,69,74,76,77,79,80],
+    ["2026083",1,2,7,13,14,18,23,27,28,38,41,48,51,54,63,65,68,71,75,78],
+    ["2026084",5,8,17,33,34,35,38,42,43,46,49,50,57,59,60,66,71,72,74,80],
+    ["2026085",1,3,4,11,13,14,26,31,33,38,40,50,56,58,61,63,65,66,69,79],
+    ["2026086",1,3,5,7,11,15,17,24,28,29,34,39,45,47,53,57,63,66,72,79],
+    ["2026087",2,5,7,10,14,23,24,32,37,41,42,44,45,46,48,63,64,71,73,76],
     ["2026088",8,9,13,14,18,22,25,33,39,40,44,46,49,55,64,66,68,71,77,80]
 ]
 
-# 从Gist加载数据
+# 加载数据
 def load_data():
     if not os.path.exists(DATA_FILE):
-        # 第一次运行，从Gist拉取
-        try:
-            url = f"https://api.github.com/gists/{GIST_ID}"
-            headers = {"Authorization": f"token {GIST_TOKEN}"}
-            r = requests.get(url, headers=headers)
-            content = r.json()['files']['kl8_data.csv']['content']
-            with open(DATA_FILE, 'w', encoding='utf-8') as f:
-                f.write(content)
-        except:
-            # 拉取失败，初始化本地数据
-            with open(DATA_FILE, 'w', newline='', encoding='utf-8') as f:
-                writer = csv.writer(f)
-                writer.writerow(['period'] + [f'n{i}' for i in range(1,21)])
-                writer.writerows(INIT_DATA)
-    
-    # 读取数据
+        with open(DATA_FILE, 'w', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f)
+            writer.writerow(['period'] + [f'n{i}' for i in range(1,21)])
+            writer.writerows(INIT_DATA)
     df = pd.read_csv(DATA_FILE)
     df = df.sort_values('period', ascending=False).reset_index(drop=True)
     return df
 
-# 保存新数据到Gist
+# 保存新数据
 def save_new_data(period, numbers):
     numbers = sorted(numbers)
-    # 先保存到本地
     with open(DATA_FILE, 'a', newline='', encoding='utf-8') as f:
         writer = csv.writer(f)
         writer.writerow([period] + numbers)
-    
-    # 同步到Gist
-    try:
-        with open(DATA_FILE, 'r', encoding='utf-8') as f:
-            content = f.read()
-        url = f"https://api.github.com/gists/{GIST_ID}"
-        headers = {"Authorization": f"token {GIST_TOKEN}"}
-        data = {
-            "files": {
-                "kl8_data.csv": {"content": content}
-            }
-        }
-        requests.patch(url, json=data, headers=headers)
-    except:
-        pass
     return True
 
-# ---------------------- 后面的分析和页面代码和之前的完全一样，不用改 ----------------------
-# ... 你把之前的分析函数、页面布局的代码直接粘在后面就行
+# 分析函数
+def analyze_data(df, window=None):
+    if window:
+        data = df.head(window).copy()
+    else:
+        data = df.copy()
+    
+    numbers_list = []
+    for _, row in data.iterrows():
+        nums = row[1:].tolist()
+        numbers_list.append(nums)
+    
+    flat = [n for p in numbers_list for n in p]
+    total_periods = len(data)
+    
+    # 冷热号
+    counter = Counter(flat)
+    hot = counter.most_common(10)
+    cold = counter.most_common()[-10:]
+    cold.reverse()
+    
+    # 遗漏值
+    last_appear = {}
+    miss_current = {}
+    miss_avg = {}
+    miss_max = {}
+    all_miss = defaultdict(list)
+    
+    for idx, nums in enumerate(numbers_list):
+        for n in nums:
+            if n in last_appear:
+                miss = idx - last_appear[n]
+                all_miss[n].append(miss)
+            last_appear[n] = idx
+    
+    for n in range(1,81):
+        if n in last_appear:
+            miss_current[n] = total_periods - 1 - last_appear[n]
+        else:
+            miss_current[n] = total_periods
+        if all_miss[n]:
+            miss_avg[n] = np.mean(all_miss[n])
+            miss_max[n] = max(all_miss[n])
+        else:
+            miss_avg[n] = 0
+            miss_max[n] = 0
+    
+    miss_df = pd.DataFrame({
+        '号码': range(1,81),
+        '当前遗漏': [miss_current[n] for n in range(1,81)],
+        '平均遗漏': [f"{miss_avg[n]:.1f}" for n in range(1,81)],
+        '最大遗漏': [miss_max[n] for n in range(1,81)],
+        '出现次数': [counter.get(n,0) for n in range(1,81)]
+    }).sort_values('当前遗漏', ascending=False)
+    
+    # 012路
+    road0 = len([n for n in flat if n%3==0])
+    road1 = len([n for n in flat if n%3==1])
+    road2 = len([n for n in flat if n%3==2])
+    
+    # 连号
+    consecutive = []
+    for p in numbers_list:
+        cnt = 0
+        for i in range(1,20):
+            if p[i] == p[i-1]+1: cnt +=1
+        consecutive.append(cnt)
+    avg_con = np.mean(consecutive) if consecutive else 0
+    max_con = max(consecutive) if consecutive else 0
+    min_con = min(consecutive) if consecutive else 0
+    
+    # 相随号
+    co_occur = defaultdict(int)
+    for p in numbers_list:
+        for i in range(20):
+            for j in range(i+1,20):
+                a,b = p[i],p[j]
+                co_occur[(a,b)] +=1
+    co_top = sorted(co_occur.items(), key=lambda x:x[1], reverse=True)[:10]
+    
+    # 跟随号
+    follow = defaultdict(int)
+    for i in range(1, len(numbers_list)):
+        prev = numbers_list[i-1]
+        curr = numbers_list[i]
+        for a in prev:
+            for b in curr:
+                follow[(a,b)] +=1
+    follow_top = sorted(follow.items(), key=lambda x:x[1], reverse=True)[:10]
+    
+    return {
+        'hot': hot, 'cold': cold, 'miss_df': miss_df,
+        'road0': road0, 'road1': road1, 'road2': road2,
+        'avg_con': avg_con, 'max_con': max_con, 'min_con': min_con,
+        'co_top': co_top, 'follow_top': follow_top,
+        'total_p': total_periods, 'flat': flat
+    }
+
+# ---------------------- 界面 ----------------------
+df = load_data()
+total_periods = len(df)
+
+tab1, tab2, tab3, tab4 = st.tabs([
+    "首页说明", "号码库管理", "多周期分析", "选号参考"
+])
+
+with tab1:
+    st.title("快乐8 数据分析系统")
+    st.subheader(f"当前数据：{total_periods}期")
+    st.warning("本工具仅为历史数据统计，不构成购彩建议，请理性购彩")
+
+with tab2:
+    st.header("开奖号码库")
+    st.subheader("录入新一期")
+    with st.form("add"):
+        new_period = st.text_input("期号 如 2026089")
+        nums_input = st.text_input("20个号码 空格分隔")
+        sub = st.form_submit_button("保存")
+        if sub:
+            try:
+                nums = list(map(int, nums_input.strip().split()))
+                if len(nums)!=20:
+                    st.error("必须20个号码")
+                elif new_period in df['period'].values:
+                    st.error("期号已存在")
+                else:
+                    save_new_data(new_period, nums)
+                    st.success("保存成功")
+                    st.rerun()
+            except:
+                st.error("格式错误")
+    
+    st.subheader("历史数据")
+    for i in range(0, total_periods, 10):
+        st.markdown(f"---")
+        for j in range(5):
+            if i+j >= total_periods: break
+            row = df.iloc[i+j]
+            p = row['period']
+            nums = row[1:].tolist()
+            st.write(f"{p}：{' '.join(f'{x:02d}' for x in nums)}")
+
+with tab3:
+    st.header("多周期分析")
+    choice = st.selectbox("选择周期", ["近10期","近20期","近50期","近100期","全量"])
+    win_map = {"近10期":10,"近20期":20,"近50期":50,"近100期":100,"全量":None}
+    w = win_map[choice]
+    
+    if w and total_periods < w:
+        st.warning(f"数据不足{w}期")
+    else:
+        res = analyze_data(df, w)
+        st.info(f"分析：{choice}，共{res['total_p']}期")
+        
+        c1,c2 = st.columns(2)
+        with c1:
+            st.subheader("热号TOP10")
+            st.dataframe(pd.DataFrame(res['hot'], columns=['号码','次数']))
+        with c2:
+            st.subheader("冷号TOP10")
+            st.dataframe(pd.DataFrame(res['cold'], columns=['号码','次数']))
+        
+        st.subheader("遗漏值")
+        st.dataframe(res['miss_df'], use_container_width=True)
+        
+        c3,c4,c5 = st.columns(3)
+        with c3:
+            st.subheader("012路")
+            st.metric("0路", res['road0'])
+            st.metric("1路", res['road1'])
+            st.metric("2路", res['road2'])
+        with c4:
+            st.subheader("连号")
+            st.metric("平均连号", round(res['avg_con'],1))
+            st.metric("最多连号", res['max_con'])
+        with c5:
+            st.subheader("区间")
+            z1 = len([x for x in res['flat'] if 1<=x<=20])
+            z2 = len([x for x in res['flat'] if 21<=x<=40])
+            z3 = len([x for x in res['flat'] if 41<=x<=60])
+            z4 = len([x for x in res['flat'] if 61<=x<=80])
+            st.metric("1-20", z1)
+            st.metric("21-40", z2)
+            st.metric("41-60", z3)
+            st.metric("61-80", z4)
+        
+        c6,c7 = st.columns(2)
+        with c6:
+            st.subheader("相随号")
+            co = [{"号码对":f"{a}&{b}","次数":c} for (a,b),c in res['co_top']]
+            st.dataframe(pd.DataFrame(co))
+        with c7:
+            st.subheader("跟随号")
+            fo = [{"上期→下期":f"{a}→{b}","次数":c} for (a,b),c in res['follow_top']]
+            st.dataframe(pd.DataFrame(fo))
+
+with tab4:
+    st.header("选号参考")
+    if total_periods < 3:
+        st.info("数据不足")
+    else:
+        last = df.iloc[0]
+        last_nums = last[1:].tolist()
+        st.subheader("上期复盘")
+        st.write(f"{last['period']}：{' '.join(f"{x:02d}" for x in last_nums)}")
+        
+        res50 = analyze_data(df,50)
+        hot5 = [x[0] for x in res50['hot'][:5]]
+        cold3 = [x[0] for x in res50['cold'][:3]]
+        ref = list(set(hot5+cold3))[:10]
+        ref.sort()
+        
+        st.subheader("参考号码（娱乐）")
+        st.success(f"{' '.join(f"{x:02d}" for x in ref)}")
+        st.caption("仅娱乐，不代表开奖结果")
