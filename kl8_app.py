@@ -908,9 +908,6 @@ with tab6:
             for b, cnt in top2:
                 layer3.add(b)
         
-        # 去重，合并所有候选
-        all_candidates = sorted(list(set(layer1 + list(layer2) + list(layer3))))
-        
         # 展示分层结构
         st.markdown("### 分层级号码池详情")
         for n in layer1:
@@ -931,15 +928,88 @@ with tab6:
                         st.markdown(f"&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;🔹 第三层：{b_formatted}的跟随号 → {fo_str}", unsafe_allow_html=True)
         
         st.divider()
-        # 汇总候选池
-        st.subheader("📊 预测候选号码汇总（去重后）")
-        all_candidates_formatted = " ".join([format_num(n) for n in all_candidates])
-        st.markdown(f"**候选号码池**：{all_candidates_formatted}", unsafe_allow_html=True)
-        st.info(f"共 {len(all_candidates)} 个候选号码，建议从这些号码中搭配选择（仅娱乐参考）")
+        # ---------------------- 优化后的分级别候选汇总 ----------------------
+        st.subheader("📊 预测候选号码汇总（分级展示）")
+        
+        # 为每个候选号码标记层级，优先级：1级 > 2级 > 3级
+        level_map = {}
+        # 1. 第一层：本期号码
+        for n in layer1:
+            level_map[n] = 1
+        # 2. 第二层：相随号
+        for n in layer2:
+            if n not in level_map:
+                level_map[n] = 2
+        # 3. 第三层：跟随号
+        for n in layer3:
+            if n not in level_map:
+                level_map[n] = 3
+        
+        # 按层级分组
+        level1_nums = sorted([n for n,l in level_map.items() if l==1])
+        level2_nums = sorted([n for n,l in level_map.items() if l==2])
+        level3_nums = sorted([n for n,l in level_map.items() if l==3])
+        
+        # 统计每个层级的冷热温、012路分布
+        def count_level_stats(nums):
+            hot = 0
+            warm = 0
+            cold = 0
+            r0 = 0
+            r1 = 0
+            r2 = 0
+            for n in nums:
+                s = num_status[n]
+                if s['status'] == 'hot':
+                    hot +=1
+                elif s['status'] == 'cold':
+                    cold +=1
+                else:
+                    warm +=1
+                if s['road'] == '0路':
+                    r0 +=1
+                elif s['road'] == '1路':
+                    r1 +=1
+                else:
+                    r2 +=1
+            return hot, warm, cold, r0, r1, r2
+        
+        # 计算各层级的统计
+        l1_h, l1_w, l1_c, l1_r0, l1_r1, l1_r2 = count_level_stats(level1_nums)
+        l2_h, l2_w, l2_c, l2_r0, l2_r1, l2_r2 = count_level_stats(level2_nums)
+        l3_h, l3_w, l3_c, l3_r0, l3_r1, l3_r2 = count_level_stats(level3_nums)
+        
+        # 1. 一级候选
+        st.markdown("#### 🔹 一级候选：本期开奖号码")
+        st.markdown("这些是本期开出的核心号码，历史上这类号码的跨期跟随性最强，优先级最高")
+        l1_formatted = " ".join([format_num(n) for n in level1_nums])
+        st.markdown(f"**号码**：{l1_formatted}", unsafe_allow_html=True)
+        st.markdown(f"统计：热号 {l1_h} | 温号 {l1_w} | 冷号 {l1_c} | 0路 {l1_r0} | 1路 {l1_r1} | 2路 {l1_r2}")
+        
+        # 2. 二级候选
+        if level2_nums:
+            st.markdown("#### 🔸 二级候选：本期号码的Top3相随号")
+            st.markdown("这些是和本期号码历史上经常一起开出的号码，同现频率最高，优先级次之")
+            l2_formatted = " ".join([format_num(n) for n in level2_nums])
+            st.markdown(f"**号码**：{l2_formatted}", unsafe_allow_html=True)
+            st.markdown(f"统计：热号 {l2_h} | 温号 {l2_w} | 冷号 {l2_c} | 0路 {l2_r0} | 1路 {l2_r1} | 2路 {l2_r2}")
+        
+        # 3. 三级候选
+        if level3_nums:
+            st.markdown("#### 🔹 三级候选：相随号的Top2跟随号")
+            st.markdown("这些是上期出了相随号后，下期最容易跟随开出的号码，跨期跟随性较强，优先级最低")
+            l3_formatted = " ".join([format_num(n) for n in level3_nums])
+            st.markdown(f"**号码**：{l3_formatted}", unsafe_allow_html=True)
+            st.markdown(f"统计：热号 {l3_h} | 温号 {l3_w} | 冷号 {l3_c} | 0路 {l3_r0} | 1路 {l3_r1} | 2路 {l3_r2}")
+        
+        # 总统计
+        total_nums = len(level1_nums) + len(level2_nums) + len(level3_nums)
+        st.info(f"共 {total_nums} 个候选号码，建议优先从一级、二级候选中搭配选择（仅娱乐参考）")
         
         # 统计候选池的012路分布
+        all_candidates = sorted(list(level_map.keys()))
         road_counter = Counter([num_status[n]['road'] for n in all_candidates])
-        st.markdown(f"候选池012路分布：0路 {road_counter.get('0路',0)}个 | 1路 {road_counter.get('1路',0)}个 | 2路 {road_counter.get('2路',0)}个")
+        st.markdown(f"候选池整体012路分布：0路 {road_counter.get('0路',0)}个 | 1路 {road_counter.get('1路',0)}个 | 2路 {road_counter.get('2路',0)}个")
         
         st.caption("以上仅为历史数据统计，不构成任何购彩建议")
 
