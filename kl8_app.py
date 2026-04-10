@@ -195,8 +195,7 @@ def analyze_data(df, window=None):
     for p in numbers_list:
         cnt = 0
         for i in range(1,20):
-            if p[i] == p[i-1]+1:
-                cnt +=1
+            if p[i] == p[i-1]+1: cnt +=1
         consecutive.append(cnt)
     avg_con = np.mean(consecutive) if consecutive else 0
     max_con = max(consecutive) if consecutive else 0
@@ -776,7 +775,7 @@ with tab6:
     - 第二层：每个本期号码的Top3相随号（经常一起出的）
     - 第三层：每个相随号的Top2跟随号（跨期跟随的）
     
-    🔴 红色 = 热号 | 🔵 蓝色 = 冷号 | ⚫ 黑色 = 温号 | 号码后标注012路
+    🔴 红色 = 热号 | 🔵 蓝色 = 冷号 | ⚫ 黑色 = 温号 | 号码后标注：012路, 历史出现次数
     """)
     
     # 选择要分析的本期期号
@@ -822,15 +821,15 @@ with tab6:
                 'count': cnt
             }
         
-        # 格式化号码的函数
+        # 格式化号码的函数：新增出现次数标注
         def format_num(n):
             s = num_status[n]
             if s['status'] == 'hot':
-                return f'<span style="color:red; font-weight:bold; margin:0 2px;">{n:02d}</span><small style="color:#666;">({s["road"]})</small>'
+                return f'<span style="color:red; font-weight:bold; margin:0 2px;">{n:02d}</span><small style="color:#666;">({s["road"]}, {s["count"]}次)</small>'
             elif s['status'] == 'cold':
-                return f'<span style="color:blue; font-weight:bold; margin:0 2px;">{n:02d}</span><small style="color:#666;">({s["road"]})</small>'
+                return f'<span style="color:blue; font-weight:bold; margin:0 2px;">{n:02d}</span><small style="color:#666;">({s["road"]}, {s["count"]}次)</small>'
             else:
-                return f'<span style="color:black; margin:0 2px;">{n:02d}</span><small style="color:#666;">({s["road"]})</small>'
+                return f'<span style="color:black; margin:0 2px;">{n:02d}</span><small style="color:#666;">({s["road"]}, {s["count"]}次)</small>'
         
         # 1. 生成上期和本期的复盘
         st.divider()
@@ -950,7 +949,12 @@ with tab6:
         level2_nums = sorted([n for n,l in level_map.items() if l==2])
         level3_nums = sorted([n for n,l in level_map.items() if l==3])
         
-        # 统计每个层级的冷热温、012路分布
+        # 每个级别内，按历史出现次数从高到低排序
+        level1_nums = sorted(level1_nums, key=lambda x: num_status[x]['count'], reverse=True)
+        level2_nums = sorted(level2_nums, key=lambda x: num_status[x]['count'], reverse=True)
+        level3_nums = sorted(level3_nums, key=lambda x: num_status[x]['count'], reverse=True)
+        
+        # 统计每个层级的冷热温、012路、出现次数分类
         def count_level_stats(nums):
             hot = 0
             warm = 0
@@ -958,33 +962,51 @@ with tab6:
             r0 = 0
             r1 = 0
             r2 = 0
+            # 新增：按出现次数区间分类
+            cnt_high = 0  # >=30次：超高热度
+            cnt_mid = 0   # 25-29次：高热度
+            cnt_low = 0   # 20-24次：中等热度
+            cnt_very_low = 0 # <20次：低热度
             for n in nums:
                 s = num_status[n]
+                # 冷热温
                 if s['status'] == 'hot':
                     hot +=1
                 elif s['status'] == 'cold':
                     cold +=1
                 else:
                     warm +=1
+                # 012路
                 if s['road'] == '0路':
                     r0 +=1
                 elif s['road'] == '1路':
                     r1 +=1
                 else:
                     r2 +=1
-            return hot, warm, cold, r0, r1, r2
+                # 次数区间分类
+                c = s['count']
+                if c >=30:
+                    cnt_high +=1
+                elif c >=25:
+                    cnt_mid +=1
+                elif c >=20:
+                    cnt_low +=1
+                else:
+                    cnt_very_low +=1
+            return hot, warm, cold, r0, r1, r2, cnt_high, cnt_mid, cnt_low, cnt_very_low
         
         # 计算各层级的统计
-        l1_h, l1_w, l1_c, l1_r0, l1_r1, l1_r2 = count_level_stats(level1_nums)
-        l2_h, l2_w, l2_c, l2_r0, l2_r1, l2_r2 = count_level_stats(level2_nums)
-        l3_h, l3_w, l3_c, l3_r0, l3_r1, l3_r2 = count_level_stats(level3_nums)
+        l1_h, l1_w, l1_c, l1_r0, l1_r1, l1_r2, l1_ch, l1_cm, l1_cl, l1_cvl = count_level_stats(level1_nums)
+        l2_h, l2_w, l2_c, l2_r0, l2_r1, l2_r2, l2_ch, l2_cm, l2_cl, l2_cvl = count_level_stats(level2_nums)
+        l3_h, l3_w, l3_c, l3_r0, l3_r1, l3_r2, l3_ch, l3_cm, l3_cl, l3_cvl = count_level_stats(level3_nums)
         
         # 1. 一级候选
         st.markdown("#### 🔹 一级候选：本期开奖号码")
         st.markdown("这些是本期开出的核心号码，历史上这类号码的跨期跟随性最强，优先级最高")
         l1_formatted = " ".join([format_num(n) for n in level1_nums])
         st.markdown(f"**号码**：{l1_formatted}", unsafe_allow_html=True)
-        st.markdown(f"统计：热号 {l1_h} | 温号 {l1_w} | 冷号 {l1_c} | 0路 {l1_r0} | 1路 {l1_r1} | 2路 {l1_r2}")
+        st.markdown(f"冷热温统计：热号 {l1_h} | 温号 {l1_w} | 冷号 {l1_c} | 0路 {l1_r0} | 1路 {l1_r1} | 2路 {l1_r2}")
+        st.markdown(f"出现次数分类：≥30次 {l1_ch} | 25-29次 {l1_cm} | 20-24次 {l1_cl} | <20次 {l1_cvl}")
         
         # 2. 二级候选
         if level2_nums:
@@ -992,7 +1014,8 @@ with tab6:
             st.markdown("这些是和本期号码历史上经常一起开出的号码，同现频率最高，优先级次之")
             l2_formatted = " ".join([format_num(n) for n in level2_nums])
             st.markdown(f"**号码**：{l2_formatted}", unsafe_allow_html=True)
-            st.markdown(f"统计：热号 {l2_h} | 温号 {l2_w} | 冷号 {l2_c} | 0路 {l2_r0} | 1路 {l2_r1} | 2路 {l2_r2}")
+            st.markdown(f"冷热温统计：热号 {l2_h} | 温号 {l2_w} | 冷号 {l2_c} | 0路 {l2_r0} | 1路 {l2_r1} | 2路 {l2_r2}")
+            st.markdown(f"出现次数分类：≥30次 {l2_ch} | 25-29次 {l2_cm} | 20-24次 {l2_cl} | <20次 {l2_cvl}")
         
         # 3. 三级候选
         if level3_nums:
@@ -1000,7 +1023,8 @@ with tab6:
             st.markdown("这些是上期出了相随号后，下期最容易跟随开出的号码，跨期跟随性较强，优先级最低")
             l3_formatted = " ".join([format_num(n) for n in level3_nums])
             st.markdown(f"**号码**：{l3_formatted}", unsafe_allow_html=True)
-            st.markdown(f"统计：热号 {l3_h} | 温号 {l3_w} | 冷号 {l3_c} | 0路 {l3_r0} | 1路 {l3_r1} | 2路 {l3_r2}")
+            st.markdown(f"冷热温统计：热号 {l3_h} | 温号 {l3_w} | 冷号 {l3_c} | 0路 {l3_r0} | 1路 {l3_r1} | 2路 {l3_r2}")
+            st.markdown(f"出现次数分类：≥30次 {l3_ch} | 25-29次 {l3_cm} | 20-24次 {l3_cl} | <20次 {l3_cvl}")
         
         # 总统计
         total_nums = len(level1_nums) + len(level2_nums) + len(level3_nums)
