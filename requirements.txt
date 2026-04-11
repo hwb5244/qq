@@ -1,4 +1,10 @@
-streamlit
-pandas
+流光的
+熊猫
 matplotlib
 numpy
+scikit-learn
+xgboost
+lightgbm
+openpyxl
+matplotlib
+seaborn
