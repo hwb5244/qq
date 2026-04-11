@@ -1,5 +1,5 @@
 import streamlit as st
- import pandas as pd
+import pandas as pd
  # ========== 全局Session状态预初始化（核心！所有底层库变量统一兜底） ==========
  init_keys = [
      "raw_original_db",   # 你的原始开奖底层库
@@ -10,7 +10,8 @@ import streamlit as st
  for key in init_keys:
      if key not in st.session_state:
          st.session_state[key] = pd.DataFrame()  # 空表占位，后续加载数据覆盖
- # ========================================================================# -------------------------- 1. 基础库导入 & 全局配置 --------------------------
+ # =======================================================================
+-------------------------- 1. 基础库导入 & 全局配置 --------------------------
 import streamlit as st
 import pandas as pd
 import numpy as np
