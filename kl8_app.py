@@ -1,4 +1,16 @@
-# -------------------------- 1. 基础库导入 & 全局配置 --------------------------
+import streamlit as st
+ import pandas as pd
+ # ========== 全局Session状态预初始化（核心！所有底层库变量统一兜底） ==========
+ init_keys = [
+     "raw_original_db",   # 你的原始开奖底层库
+     "26_year_db",        # 你自建的26年开奖库
+     "tongqi_db",         # 同期号关联库
+     "re_leng_data_db"    # 冷热分析衍生库
+ ]
+ for key in init_keys:
+     if key not in st.session_state:
+         st.session_state[key] = pd.DataFrame()  # 空表占位，后续加载数据覆盖
+ # ========================================================================# -------------------------- 1. 基础库导入 & 全局配置 --------------------------
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -788,7 +800,13 @@ with tab1:
     col1, col2 = st.columns(2)
     with col1:
         st.subheader("只读原始底层库")
-        st.dataframe(st.session_state["raw_original_db"], use_container_width=True)
+        if "raw_original_db" not in st.session_state:
+    # 兜底：初始化空DataFrame，适配你的彩票底层库结构
+    import pandas as pd
+    st.session_state["raw_original_db"] = pd.DataFrame(columns=["期号", "开奖号码", "日期"])
+
+# 安全渲染，不会再报KeyError
+st.dataframe(st.session_state["raw_original_db"], use_container_width=True)
         # 原始库下载
         st.download_button(
             label="下载原始底层库CSV",
