@@ -1484,5 +1484,5 @@ def build_streamlit_page():
                 st.download_button("📥 下载胆拖组合", dt_df.to_csv(index=True, encoding="utf-8-sig"), f"快乐8_{df.iloc[-1]['期号']}_胆拖组合.csv", "text/csv", use_container_width=True)
 
  # ===================== 程序入口（直接运行即可启动） =====================
- if __name__ == "__main__":
+if __name__ == "__main__":
      build_streamlit_page()
