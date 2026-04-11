@@ -803,7 +803,7 @@ with tab1:
         st.subheader("只读原始底层库")
         if "raw_original_db" not in st.session_state:
     # 兜底：初始化空DataFrame，适配你的彩票底层库结构
-  import pandas as pd
+import pandas as pd
     st.session_state["raw_original_db"] = pd.DataFrame(columns=["期号", "开奖号码", "日期"])
 
 # 安全渲染，不会再报KeyError
