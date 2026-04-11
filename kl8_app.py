@@ -407,13 +407,18 @@ def generate_low_repeat_combinations(predict_df, select_count=8, group_count=5, 
     top_pool = predict_df.head(select_count*3)["号码"].tolist()
     combos = []
     for _ in range(group_count):
-        cand = [n for n in top_pool if sum(n in c for c in combos)/len(combos) <= max_repeat_rate if combos else True][:select_count]
+        # 修复语法错误的核心代码
+        if not combos:
+            cand = top_pool[:select_count]
+        else:
+            cand = [n for n in top_pool if sum(n in c for c in combos)/len(combos) <= max_repeat_rate][:select_count]
+        
         combo = sorted(cand if cand else top_pool[:select_count])
         if combo not in combos:
             combos.append(combo)
     while len(combos) < group_count:
         combos.append(sorted(np.random.choice(top_pool, select_count, replace=False)))
-    return pd.DataFrame(combos, columns=[f"号码{i+1}" for i in range(select_count)], index=[f"第{i+1}组" for i in range(len(combos))])
+    return pd.DataFrame(combos, columns=[f"号码{i+1}" for i in range(select_count)], index=[f"第{i+1}组" for i in range(len(combos))]) 
 
 def generate_dantuo_combinations(predict_df, dan_count=5, tuo_count=8, group_count=5, max_dan_repeat_rate=0.2, max_tuo_repeat_rate=0.4):
     dan_pool = predict_df.head(dan_count*3)["号码"].tolist()
