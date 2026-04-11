@@ -809,7 +809,7 @@ if  "raw_original_db" not in st.session_state:
 # 安全渲染，不会再报KeyError
 st.dataframe(st.session_state["raw_original_db"], use_container_width=True)
         # 原始库下载
-        st.download_button(
+    st.download_button(
             label="下载原始底层库CSV",
             data=st.session_state["raw_original_db"].to_csv(index=False).encode("utf-8"),
             file_name="快乐8_原始开奖底层库.csv",
