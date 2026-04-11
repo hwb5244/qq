@@ -1081,11 +1081,11 @@ with tab6:
                 nums_formatted = " ".join([format_num(n, num_status) for n in nums_sorted])
                 st.markdown(f"**出现{cnt}次**：{nums_formatted}", unsafe_allow_html=True)
 
-# ---------------------- Tab7 数据管理与重置（完整续写闭合）----------------------
+# ---------------------- Tab7 数据管理与重置【终极修复版，解决括号未闭合报错】----------------------
 with tab7:
     st.header("⚙️ 数据管理与重置")
     st.info("支持原始CSV数据备份、一键重置，保障数据安全")
-    
+
     # CSV备份下载
     st.subheader("📄 原始CSV数据备份")
     st.markdown("下载系统底层使用的CSV原始文件，可用于系统迁移、数据恢复")
@@ -1101,7 +1101,7 @@ with tab7:
         )
     else:
         st.warning("数据文件不存在，请先初始化系统")
-    
+
     st.divider()
     # 数据统计总览
     st.subheader("📈 数据统计总览")
@@ -1114,7 +1114,7 @@ with tab7:
         st.metric("最新期号", df.iloc[0]["period"] if total_periods > 0 else "无")
     with col_stat4:
         st.metric("总号码记录数", f"{total_periods * 20}个")
-    
+
     # 号码出现次数统计
     st.markdown("#### 号码出现次数统计概览")
     full_analysis = get_full_analysis_cached(df)
@@ -1123,38 +1123,35 @@ with tab7:
         "总出现次数": [full_analysis["hot_cold"]["full_counter"][n] for n in range(1, 81)]
     }).sort_values("总出现次数", ascending=False)
     st.dataframe(count_df, hide_index=True, use_container_width=True, height=300)
-    
+
     st.divider()
-    # 数据重置功能（完整续写）
+    # 数据重置功能【修复括号BUG核心段】
     st.subheader("⚠️ 数据重置（危险操作）")
     st.error("此操作会清空所有自定义录入的数据，恢复到系统初始的88期基准数据，不可恢复！")
     with st.form("reset_form", border=True):
         reset_confirm = st.checkbox("我已阅读风险提示，确认要重置所有数据，恢复到初始88期基准数据")
         reset_submit = st.form_submit_button("执行数据重置", type="secondary", use_container_width=True)
         
-        # 重置逻辑
         if reset_submit:
             if reset_confirm:
-                # 重写数据文件，恢复初始基准数据
-                with open(DATA_FILE
+                # ✅ 修复点：完整闭合 open() 括号、引号、参数，根治语法报错
+                with open(DATA_FILE, 'w', newline='', encoding='utf-8') as f:
                     writer = csv.writer(f)
-                    # 写入标准表头
                     writer.writerow(['period'] + [f'n{i}' for i in range(1,21)])
-                    # 写入完整88期初始基准数据
                     writer.writerows(INIT_DATA)
-                # 清除所有缓存，强制刷新数据
+                # 清空缓存+刷新
                 load_data_cached.clear()
                 get_full_analysis_cached.clear()
-                st.success("✅ 数据已成功重置为初始88期基准数据！页面即将自动刷新...")
+                st.success("✅ 数据已重置为原始88期基准数据！页面自动刷新中...")
                 st.rerun()
             else:
-                st.error("❌ 请先勾选确认框，确认风险提示后再执行重置操作！")
+                st.error("❌ 请先勾选确认框，再执行重置操作！")
 
-# ====================== 全局合规风险提示收尾 ======================
+# ====================== 全局尾部闭合 + 合规声明【补全所有代码块】======================
 st.divider()
 st.markdown("""
-<div style="text-align: center; color: #666; font-size: 14px; line-height: 1.8; padding: 10px 0;">
-⚠️ 本系统仅用于福彩快乐8历史开奖数据的统计与娱乐性分析，彩票开奖为完全随机独立事件<br>
-所有分析结果、选号参考均不构成任何购彩建议，请理性购彩，量力而行，遵守国家相关法律法规
+<div style="text-align: center; color: #666; font-size: 14px; line-height: 1.8;">
+⚠️ 本系统仅用于历史开奖数据统计娱乐，彩票开奖为完全随机事件<br>
+不构成任何购彩建议，请理性购彩、量力而行，遵守国家法律法规
 </div>
 """, unsafe_allow_html=True)
