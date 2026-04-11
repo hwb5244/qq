@@ -1257,398 +1257,232 @@ def generate_dantuo_combinations(predict_df, dan_count=5, tuo_count=8, group_cou
     return dantuo_df, dan_pool, tuo_pool
 
 # ===================== 8. Streamlit完整页面布局（全Tab补全+交互闭环） =====================
- def build_streamlit_page():
-     """构建完整Streamlit页面，全功能交互闭环"""
-     st.title("快乐8数据分析&预测系统V2.0终版 | 全功能闭环")
-     st.markdown("---")
-     # 侧边栏参数配置
-     with st.sidebar:
-         st.header("⚙️ 参数配置中心")
-         st.markdown("### 1. 数据上传")
-         uploaded_file = st.file_uploader("上传官方开奖数据（CSV/Excel）", type=["csv", "xlsx"])
-         st.caption("必填格式：第一列为【期号】，后续20列为【开奖号码1-20】")
-         
-         st.markdown("---")
-         st.markdown("### 2. 特征工程参数")
-         rolling_windows = st.multiselect(
-             "滚动统计周期（期）",
-             options=[1, 5, 10, 20, 30, 50, 100],
-             default=[5, 10, 30]
-         )
-         
-         st.markdown("---")
-         st.markdown("### 3. 多模型权重配置")
-         st.caption("权重总和自动归一化")
-         lr_weight = st.slider("逻辑回归权重", 0.0, 1.0, 0.15, 0.05)
-         rf_weight = st.slider("随机森林权重", 0.0, 1.0, 0.2, 0.05)
-         xgb_weight = st.slider("XGBoost权重", 0.0, 1.0, 0.35, 0.05)
-         lgb_weight = st.slider("LightGBM权重", 0.0, 1.0, 0.3, 0.05)
-         # 权重自动归一化
-         total_weight = lr_weight + rf_weight + xgb_weight + lgb_weight
-         model_weight_config = {
-             "LogisticRegression": lr_weight / total_weight,
-             "RandomForest": rf_weight / total_weight,
-             "XGBoost": xgb_weight / total_weight,
-             "LightGBM": lgb_weight / total_weight
-         }
-         
-         st.markdown("---")
-         st.markdown("### 4. 普通组合参数")
-         select_number_count = st.slider("单组选号个数", min_value=5, max_value=20, value=8)
-         generate_group_count = st.slider("生成组合组数", min_value=1, max_value=20, value=5)
-         max_repeat_rate = st.slider("组间最大重复率", min_value=0.1, max_value=0.5, value=0.3, step=0.05)
-         
-         st.markdown("---")
-         st.markdown("### 5. 胆拖组合参数")
-         dan_count = st.slider("胆码个数", min_value=1, max_value=10, value=5)
-         tuo_count = st.slider("拖码个数", min_value=5, max_value=20, value=8)
-         dantuo_group_count = st.slider("胆拖组合组数", min_value=1, max_value=20, value=5)
-         max_dan_repeat = st.slider("胆码最大重复率", min_value=0.1, max_value=0.5, value=0.2, step=0.05)
-         max_tuo_repeat = st.slider("拖码最大重复率", min_value=0.2, max_value=0.7, value=0.4, step=0.05)
-         
-         st.markdown("---")
-         st.markdown("### 6. 免责声明")
-         st.caption("本系统仅为数据分析工具，彩票开奖为独立随机事件，不构成任何购彩建议，理性购彩，量力而行")
-     # 核心数据加载
-     df = load_standard_data(uploaded_file)
-     # 主页面Tab布局
-     tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
-         "📊 数据底层库", "🔍 基础特征工程", "✨ 高级特征分析",
-         "🤖 单模型预测", "🚀 多模型融合优化", "📈 命中率复盘",
-         "🎫 普通打票组合", "💎 胆拖组合生成"
-     ])
-     # -------------------- Tab1：数据底层库管理 --------------------
-     with tab1:
-         st.header("📊 底层数据库管理（原始库只读不可修改）")
-         if not df.empty:
-             col1, col2 = st.columns(2)
-             with col1:
-                 st.subheader("只读原始底层库")
-                 st.dataframe(st.session_state["raw_original_db"], use_container_width=True, height=400)
-                 # 原始库下载
-                 st.download_button(
-                     label="📥 下载原始底层库CSV",
-                     data=st.session_state["raw_original_db"].to_csv(index=False, encoding="utf-8-sig"),
-                     file_name="快乐8_原始开奖底层库.csv",
-                     mime="text/csv",
-                     use_container_width=True
-                 )
-             with col2:
-                 st.subheader("标准化分析库")
-                 st.dataframe(df[["期号", "开奖号码集合"]], use_container_width=True, height=400)
-                 metric_col1, metric_col2 = st.columns(2)
-                 with metric_col1:
-                     st.metric("有效历史期数", len(df))
-                 with metric_col2:
-                     st.metric("最新期号", df["期号"].iloc[-1])
-         else:
-             st.warning("无有效数据，请检查上传文件")
-     # -------------------- Tab2：基础特征工程 --------------------
-     with tab2:
-         st.header("🔍 基础特征工程中心（自定义规则+防数据泄露）")
-         if df.empty:
-             st.warning("请先在【数据底层库】上传有效数据")
-         else:
-             if st.button("✅ 一键生成全量特征（含高级特征）", type="primary", use_container_width=True):
-                 with st.spinner("特征工程计算中，严格滚动窗口防数据泄露..."):
-                     feature_df, valid_feature_columns = build_feature_engineer(df, rolling_window_list=rolling_windows)
-                 
-                 if not feature_df.empty:
-                     st.success(f"全量特征生成完成！有效特征数量：{len(valid_feature_columns)} 个")
-                     col1, col2 = st.columns(2)
-                     with col1:
-                         st.subheader("特征数据集总览")
-                         st.dataframe(feature_df, use_container_width=True)
-                         metric_col1, metric_col2 = st.columns(2)
-                         with metric_col1:
-                             st.metric("有效特征数量", len(valid_feature_columns))
-                         with metric_col2:
-                             st.metric("有效样本量", len(feature_df))
-                     with col2:
-                         st.subheader("核心有效特征列表")
-                         st.write(valid_feature_columns)
-                     
-                     # 特征库下载
-                     st.download_button(
-                         label="📥 下载全量特征工程底层库CSV",
-                         data=feature_df.to_csv(index=False, encoding="utf-8-sig"),
-                         file_name="快乐8_全量特征工程底层库.csv",
-                         mime="text/csv",
-                         use_container_width=True
-                     )
-     # -------------------- Tab3：高级特征分析 --------------------
-     with tab3:
-         st.header("✨ 高级特征分析中心")
-         feature_df = st.session_state["feature_engineered_db"]
-         feature_columns = st.session_state["feature_columns"]
-         if feature_df.empty or len(feature_columns) == 0:
-             st.warning("请先在【基础特征工程】完成全量特征生成")
-         else:
-             # 特征分析
-             corr_df, feature_var = feature_analysis(feature_df, feature_columns)
-             
-             col1, col2 = st.columns(2)
-             with col1:
-                 st.subheader("特征方差排名（区分度从高到低）")
-                 st.dataframe(feature_var, use_container_width=True, column_config={"value": "特征方差"})
-             with col2:
-                 st.subheader("区间热度统计（最新一期）")
-                 interval_cols = [col for col in feature_df.columns if "近30期_区间" in col and "热度" in col]
-                 if len(interval_cols) > 0:
-                     latest_interval_hot = feature_df[interval_cols].iloc[-1].sort_values(ascending=False)
-                     st.bar_chart(latest_interval_hot, use_container_width=True)
-             
-             st.markdown("---")
-             st.subheader("特征相关性热力图（Top20高区分度特征）")
-             top20_features = feature_var.head(20).index.tolist()
-             top20_corr = feature_df[top20_features].corr()
-             # 绘制热力图
-             fig, ax = plt.subplots(figsize=(12, 8))
-             sns.heatmap(top20_corr, annot=True, cmap="coolwarm", vmin=-1, vmax=1, ax=ax, fmt=".2f")
-             st.pyplot(fig)
-             
-             # 高级特征下载
-             st.download_button(
-                 label="📥 下载高级特征明细CSV",
-                 data=feature_df[[col for col in feature_df.columns if any(keyword in col for keyword in ["区间", "奇偶", "尾号", "连号", "斜连"])]].to_csv(index=False, encoding="utf-8-sig"),
-                 file_name="快乐8_高级特征明细.csv",
-                 mime="text/csv",
-                 use_container_width=True
-             )
-     # -------------------- Tab4：单模型预测 --------------------
-     with tab4:
-         st.header("🤖 单模型预测中心（XGBoost基准模型）")
-         feature_df = st.session_state["feature_engineered_db"]
-         feature_columns = st.session_state["feature_columns"]
-         if feature_df.empty or len(feature_columns) == 0:
-             st.warning("请先在【基础特征工程】完成特征生成")
-         else:
-             if st.button("✅ 一键训练单模型&生成预测", type="primary", use_container_width=True):
-                 with st.spinner("模型训练&预测中，防过拟合优化..."):
-                     predict_df, hit_summary_df, accuracy_df = train_predict_model(feature_df, feature_columns)
-                 
-                 if not predict_df.empty:
-                     st.success("单模型预测完成！")
-                     st.subheader("下期号码预测排名（按最终融合概率降序）")
-                     
-                     col1, col2 = st.columns(2)
-                     with col1:
-                         st.dataframe(predict_df, use_container_width=True)
-                     with col2:
-                         st.subheader("Top20高概率推荐号码")
-                         top20_numbers = predict_df.head(20)["号码"].tolist()
-                         st.markdown(f"### {sorted(top20_numbers)}")
-                     
-                     # 预测结果下载
-                     st.download_button(
-                         label="📥 下载单模型预测结果CSV",
-                         data=predict_df.to_csv(index=False, encoding="utf-8-sig"),
-                         file_name=f"快乐8_{df['期号'].iloc[-1]}期_单模型预测号码池.csv",
-                         mime="text/csv",
-                         use_container_width=True
-                     )
-     # -------------------- Tab5：多模型融合优化 --------------------
-     with tab5:
-         st.header("🚀 多模型融合优化中心")
-         feature_df = st.session_state["feature_engineered_db"]
-         feature_columns = st.session_state["feature_columns"]
-         if feature_df.empty or len(feature_columns) == 0:
-             st.warning("请先在【基础特征工程】完成全量特征生成")
-         else:
-             st.subheader("当前模型权重配置（归一化后）")
-             weight_col1, weight_col2, weight_col3, weight_col4 = st.columns(4)
-             with weight_col1:
-                 st.metric("逻辑回归", f"{round(model_weight_config['LogisticRegression']*100, 2)}%")
-             with weight_col2:
-                 st.metric("随机森林", f"{round(model_weight_config['RandomForest']*100, 2)}%")
-             with weight_col3:
-                 st.metric("XGBoost", f"{round(model_weight_config['XGBoost']*100, 2)}%")
-             with weight_col4:
-                 st.metric("LightGBM", f"{round(model_weight_config['LightGBM']*100, 2)}%")
-             
-             if st.button("✅ 一键训练多模型&融合预测", type="primary", use_container_width=True):
-                 with st.spinner("多模型训练&融合预测中，防过拟合优化..."):
-                     final_predict_df, model_metrics_df, hit_summary_df = train_multi_model(
-                         feature_df, feature_columns, model_weight_config=model_weight_config
-                     )
-                 
-                 if not final_predict_df.empty:
-                     st.success("多模型融合预测完成！")
-                     
-                     st.markdown("---")
-                     st.subheader("模型效果对比")
-                     st.dataframe(model_metrics_df, use_container_width=True)
-                     st.bar_chart(model_metrics_df, x="模型名称", y="平均AUC值", use_container_width=True)
-                     
-                     st.markdown("---")
-                     st.subheader("下期号码融合预测排名（按最终融合概率降序）")
-                     col1, col2 = st.columns(2)
-                     with col1:
-                         st.dataframe(final_predict_df, use_container_width=True)
-                     with col2:
-                         st.subheader("Top20高概率推荐号码")
-                         top20_numbers = final_predict_df.head(20)["号码"].tolist()
-                         st.markdown(f"### {sorted(top20_numbers)}")
-                         st.subheader("Top5胆码推荐")
-                         top5_dan = final_predict_df.head(5)["号码"].tolist()
-                         st.markdown(f"### {sorted(top5_dan)}")
-                     
-                     # 融合预测结果下载
-                     st.download_button(
-                         label="📥 下载多模型融合预测结果CSV",
-                         data=final_predict_df.to_csv(index=False, encoding="utf-8-sig"),
-                         file_name=f"快乐8_{df['期号'].iloc[-1]}期_多模型融合预测号码池.csv",
-                         mime="text/csv",
-                         use_container_width=True
-                     )
-     # -------------------- Tab6：命中率复盘 --------------------
-     with tab6:
-         st.header("📈 命中率复盘中心（多维归因，定位准确率短板）")
-         col1, col2 = st.columns(2)
-         with col1:
-             st.subheader("单模型命中率复盘")
-             hit_summary_df = st.session_state["hit_summary"]
-             if hit_summary_df.empty:
-                 st.warning("请先在【单模型预测】完成模型训练")
-             else:
-                 metric_col1, metric_col2, metric_col3 = st.columns(3)
-                 with metric_col1:
-                     st.metric("测试集平均命中个数", round(hit_summary_df["Top20预测命中个数"].mean(), 2))
-                 with metric_col2:
-                     st.metric("测试集平均命中率", f"{round(hit_summary_df['命中率'].mean()*100, 2)}%")
-                 with metric_col3:
-                     st.metric("最高单期命中个数", hit_summary_df["Top20预测命中个数"].max())
-                 
-                 st.subheader("每期命中率走势")
-                 st.line_chart(hit_summary_df, x="期号", y="Top20预测命中个数", use_container_width=True)
-                 
-                 # 复盘报告下载
-                 st.download_button(
-                     label="📥 下载单模型命中率复盘报告CSV",
-                     data=hit_summary_df.to_csv(index=False, encoding="utf-8-sig"),
-                     file_name="快乐8_单模型命中率复盘报告.csv",
-                     mime="text/csv",
-                     use_container_width=True
-                 )
-         
-         with col2:
-             st.subheader("多模型融合命中率复盘")
-             multi_hit_summary_df = st.session_state["multi_model_hit_summary"]
-             if multi_hit_summary_df.empty:
-                 st.warning("请先在【多模型融合优化】完成模型训练")
-             else:
-                 metric_col1, metric_col2, metric_col3 = st.columns(3)
-                 with metric_col1:
-                     st.metric("测试集平均命中个数", round(multi_hit_summary_df["Top20预测命中个数"].mean(), 2))
-                 with metric_col2:
-                     st.metric("测试集平均命中率", f"{round(multi_hit_summary_df['命中率'].mean()*100, 2)}%")
-                 with metric_col3:
-                     st.metric("最高单期命中个数", multi_hit_summary_df["Top20预测命中个数"].max())
-                 
-                 st.subheader("每期命中率走势")
-                 st.line_chart(multi_hit_summary_df, x="期号", y="Top20预测命中个数", use_container_width=True)
-                 
-                 # 复盘报告下载
-                 st.download_button(
-                     label="📥 下载多模型融合命中率复盘报告CSV",
-                     data=multi_hit_summary_df.to_csv(index=False, encoding="utf-8-sig"),
-                     file_name="快乐8_多模型融合命中率复盘报告.csv",
-                     mime="text/csv",
-                     use_container_width=True
-                 )
-     # -------------------- Tab7：普通打票组合 --------------------
-     with tab7:
-         st.header("🎫 低重复率普通打票组合生成中心")
-         predict_source = st.radio("选择预测数据源", ["单模型预测结果", "多模型融合预测结果"], horizontal=True)
-         
-         # 数据源选择
-         predict_df = None
-         if predict_source == "单模型预测结果":
-             predict_df = st.session_state["predict_result"]
-             if predict_df.empty:
-                 st.warning("请先在【单模型预测】完成预测结果生成")
-         else:
-             predict_df = st.session_state["final_predict_result"]
-             if predict_df.empty:
-                 st.warning("请先在【多模型融合优化】完成预测结果生成")
-         
-         if not predict_df.empty:
-             if st.button("✅ 生成低重复率普通打票组合", type="primary", use_container_width=True):
-                 combo_df = generate_low_repeat_combinations(
-                     predict_df=predict_df,
-                     select_count=select_number_count,
-                     group_count=generate_group_count,
-                     max_repeat_rate=max_repeat_rate
-                 )
-                 
-                 if not combo_df.empty:
-                     st.success(f"成功生成{generate_group_count}组{select_number_count}码低重复率组合")
-                     st.dataframe(combo_df, use_container_width=True)
-                     
-                     # 组合下载
-                     st.download_button(
-                         label="📥 下载普通打票组合CSV",
-                         data=combo_df.to_csv(index=True, encoding="utf-8-sig"),
-                         file_name=f"快乐8_{df['期号'].iloc[-1]}期_普通打票组合.csv",
-                         mime="text/csv",
-                         use_container_width=True
-                     )
-     # -------------------- Tab8：胆拖组合生成 --------------------
-     with tab8:
-         st.header("💎 胆拖组合专属生成中心")
-         predict_source = st.radio("选择预测数据源", ["多模型融合预测结果", "单模型预测结果"], horizontal=True)
-         
-         # 数据源选择
-         predict_df = None
-         if predict_source == "多模型融合预测结果":
-             predict_df = st.session_state["final_predict_result"]
-             if predict_df.empty:
-                 st.warning("请先在【多模型融合优化】完成预测结果生成")
-         else:
-             predict_df = st.session_state["predict_result"]
-             if predict_df.empty:
-                 st.warning("请先在【单模型预测】完成预测结果生成")
-         
-         if not predict_df.empty:
-             # 8+8专属模式一键切换
-             if st.checkbox("启用8+8专属模式（8胆8拖）"):
-                 dan_count = 8
-                 tuo_count = 8
-                 st.info("已启用8+8专属模式，胆码个数=8，拖码个数=8")
-             
-             if st.button("✅ 生成低重复率胆拖组合", type="primary", use_container_width=True):
-                 dantuo_df, dan_pool, tuo_pool = generate_dantuo_combinations(
-                     predict_df=predict_df,
-                     dan_count=dan_count,
-                     tuo_count=tuo_count,
-                     group_count=dantuo_group_count,
-                     max_dan_repeat_rate=max_dan_repeat,
-                     max_tuo_repeat_rate=max_tuo_repeat
-                 )
-                 
-                 if not dantuo_df.empty:
-                     st.success(f"成功生成{dantuo_group_count}组{dan_count}胆{tuo_count}拖低重复率组合")
-                     
-                     col1, col2 = st.columns(2)
-                     with col1:
-                         st.subheader("胆码池（Top高概率）")
-                         st.write(sorted(dan_pool))
-                     with col2:
-                         st.subheader("拖码池（次高概率）")
-                         st.write(sorted(tuo_pool))
-                     
-                     st.markdown("---")
-                     st.subheader("胆拖组合明细")
-                     st.dataframe(dantuo_df, use_container_width=True)
-                     
-                     # 胆拖组合下载
-                     st.download_button(
-                         label="📥 下载胆拖组合CSV",
-                         data=dantuo_df.to_csv(index=True, encoding="utf-8-sig"),
-                         file_name=f"快乐8_{df['期号'].iloc[-1]}期_{dan_count}胆{tuo_count}拖组合.csv",
-                         mime="text/csv",
-                         use_container_width=True
-                     )
+# 顶格定义函数，无任何缩进
+def build_streamlit_page():
+    """构建完整Streamlit页面，全功能交互闭环"""
+    st.title("快乐8数据分析&预测系统V2.0终版 | 全功能闭环")
+    st.markdown("---")
+
+    # 侧边栏参数配置
+    with st.sidebar:
+        st.header("⚙️ 参数配置中心")
+        st.markdown("### 1. 数据上传")
+        uploaded_file = st.file_uploader("上传官方开奖数据（CSV/Excel）", type=["csv", "xlsx"])
+        st.caption("必填格式：第一列为【期号】，后续20列为【开奖号码1-20】")
+        
+        st.markdown("---")
+        st.markdown("### 2. 特征工程参数")
+        rolling_windows = st.multiselect(
+            "滚动统计周期（期）",
+            options=[1, 5, 10, 20, 30, 50, 100],
+            default=[5, 10, 30]
+        )
+        
+        st.markdown("---")
+        st.markdown("### 3. 多模型权重配置")
+        st.caption("权重总和自动归一化")
+        lr_weight = st.slider("逻辑回归权重", 0.0, 1.0, 0.15, 0.05)
+        rf_weight = st.slider("随机森林权重", 0.0, 1.0, 0.2, 0.05)
+        xgb_weight = st.slider("XGBoost权重", 0.0, 1.0, 0.35, 0.05)
+        lgb_weight = st.slider("LightGBM权重", 0.0, 1.0, 0.3, 0.05)
+        total_weight = lr_weight + rf_weight + xgb_weight + lgb_weight
+        model_weight_config = {
+            "LogisticRegression": lr_weight / total_weight,
+            "RandomForest": rf_weight / total_weight,
+            "XGBoost": xgb_weight / total_weight,
+            "LightGBM": lgb_weight / total_weight
+        }
+        
+        st.markdown("---")
+        st.markdown("### 4. 普通组合参数")
+        select_number_count = st.slider("单组选号个数", 5, 20, 8)
+        generate_group_count = st.slider("生成组合组数", 1, 20, 5)
+        max_repeat_rate = st.slider("组间最大重复率", 0.1, 0.5, 0.3, 0.05)
+        
+        st.markdown("---")
+        st.markdown("### 5. 胆拖组合参数")
+        dan_count = st.slider("胆码个数", 1, 10, 5)
+        tuo_count = st.slider("拖码个数", 5, 20, 8)
+        dantuo_group_count = st.slider("胆拖组合组数", 1, 20, 5)
+        max_dan_repeat = st.slider("胆码最大重复率", 0.1, 0.5, 0.2, 0.05)
+        max_tuo_repeat = st.slider("拖码最大重复率", 0.2, 0.7, 0.4, 0.05)
+        
+        st.markdown("---")
+        st.markdown("### 6. 免责声明")
+        st.caption("本系统仅为数据分析工具，彩票开奖为独立随机事件，不构成任何购彩建议，理性购彩，量力而行")
+
+    df = load_standard_data(uploaded_file)
+
+    tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs([
+        "📊 数据底层库", "🔍 基础特征工程", "✨ 高级特征分析",
+        "🤖 单模型预测", "🚀 多模型融合优化", "📈 命中率复盘",
+        "🎫 普通打票组合", "💎 胆拖组合生成"
+    ])
+
+    with tab1:
+        st.header("📊 底层数据库管理")
+        if not df.empty:
+            col1, col2 = st.columns(2)
+            with col1:
+                st.subheader("只读原始底层库")
+                st.dataframe(st.session_state["raw_original_db"], use_container_width=True, height=400)
+                st.download_button("📥 下载原始底层库CSV", st.session_state["raw_original_db"].to_csv(index=False, encoding="utf-8-sig"), "快乐8_原始开奖底层库.csv", "text/csv", use_container_width=True)
+            with col2:
+                st.subheader("标准化分析库")
+                st.dataframe(df[["期号", "开奖号码集合"]], use_container_width=True, height=400)
+                m1, m2 = st.columns(2)
+                with m1: st.metric("有效历史期数", len(df))
+                with m2: st.metric("最新期号", df["期号"].iloc[-1])
+        else:
+            st.warning("无有效数据，请检查上传文件")
+
+    with tab2:
+        st.header("🔍 基础特征工程中心")
+        if df.empty:
+            st.warning("请先在【数据底层库】上传有效数据")
+        else:
+            if st.button("✅ 一键生成全量特征", type="primary", use_container_width=True):
+                with st.spinner("特征计算中..."):
+                    feature_df, valid_feature_columns = build_feature_engineer(df, rolling_window_list=rolling_windows)
+                if not feature_df.empty:
+                    st.success(f"特征生成完成！有效特征：{len(valid_feature_columns)} 个")
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.dataframe(feature_df, use_container_width=True)
+                        m1, m2 = st.columns(2)
+                        with m1: st.metric("有效特征数", len(valid_feature_columns))
+                        with m2: st.metric("有效样本量", len(feature_df))
+                    with col2:
+                        st.write(valid_feature_columns)
+                    st.download_button("📥 下载特征库", feature_df.to_csv(index=False, encoding="utf-8-sig"), "快乐8_全量特征库.csv", "text/csv", use_container_width=True)
+
+    with tab3:
+        st.header("✨ 高级特征分析中心")
+        f_df = st.session_state.get("feature_engineered_db", pd.DataFrame())
+        f_cols = st.session_state.get("feature_columns", [])
+        if f_df.empty or not f_cols:
+            st.warning("请先生成特征")
+        else:
+            corr_df, f_var = feature_analysis(f_df, f_cols)
+            col1, col2 = st.columns(2)
+            with col1:
+                st.subheader("特征方差排名")
+                st.dataframe(f_var, use_container_width=True)
+            with col2:
+                st.subheader("区间热度")
+                interval_cols = [c for c in f_df.columns if "近30期_区间" in c and "热度" in c]
+                if interval_cols:
+                    st.bar_chart(f_df[interval_cols].iloc[-1].sort_values(ascending=False))
+            st.subheader("特征相关性热力图")
+            top20 = f_var.head(20).index.tolist()
+            fig, ax = plt.subplots(figsize=(12,8))
+            sns.heatmap(f_df[top20].corr(), annot=True, cmap="coolwarm", ax=ax, fmt=".2f")
+            st.pyplot(fig)
+            st.download_button("📥 下载高级特征", f_df[[c for c in f_df.columns if any(k in c for k in ["区间","奇偶","尾号","连号","斜连"])]].to_csv(index=False, encoding="utf-8-sig"), "快乐8_高级特征.csv", "text/csv", use_container_width=True)
+
+    with tab4:
+        st.header("🤖 单模型预测")
+        f_df = st.session_state.get("feature_engineered_db", pd.DataFrame())
+        f_cols = st.session_state.get("feature_columns", [])
+        if f_df.empty or not f_cols:
+            st.warning("请先生成特征")
+        else:
+            if st.button("✅ 训练单模型", type="primary", use_container_width=True):
+                with st.spinner("训练中..."):
+                    pred_df, hit_df, acc_df = train_predict_model(f_df, f_cols)
+                if not pred_df.empty:
+                    st.success("预测完成！")
+                    col1, col2 = st.columns(2)
+                    with col1: st.dataframe(pred_df, use_container_width=True)
+                    with col2:
+                        st.subheader("Top20号码")
+                        st.markdown(f"### {sorted(pred_df.head(20)['号码'].tolist())}")
+                    st.download_button("📥 下载单模型结果", pred_df.to_csv(index=False, encoding="utf-8-sig"), f"快乐8_{df.iloc[-1]['期号']}_单模型结果.csv", "text/csv", use_container_width=True)
+
+    with tab5:
+        st.header("🚀 多模型融合")
+        f_df = st.session_state.get("feature_engineered_db", pd.DataFrame())
+        f_cols = st.session_state.get("feature_columns", [])
+        if f_df.empty or not f_cols:
+            st.warning("请先生成特征")
+        else:
+            st.subheader("模型权重")
+            w1,w2,w3,w4 = st.columns(4)
+            with w1: st.metric("LR", f"{model_weight_config['LogisticRegression']*100:.1f}%")
+            with w2: st.metric("RF", f"{model_weight_config['RandomForest']*100:.1f}%")
+            with w3: st.metric("XGB", f"{model_weight_config['XGBoost']*100:.1f}%")
+            with w4: st.metric("LGB", f"{model_weight_config['LightGBM']*100:.1f}%")
+            if st.button("✅ 训练多模型", type="primary", use_container_width=True):
+                with st.spinner("融合训练中..."):
+                    final_df, metrics_df, hit_multi_df = train_multi_model(f_df, f_cols, model_weight_config)
+                if not final_df.empty:
+                    st.success("融合完成！")
+                    st.dataframe(metrics_df, use_container_width=True)
+                    st.bar_chart(metrics_df, x="模型名称", y="平均AUC值")
+                    col1, col2 = st.columns(2)
+                    with col1: st.dataframe(final_df, use_container_width=True)
+                    with col2:
+                        st.subheader("Top20号码")
+                        st.markdown(f"### {sorted(final_df.head(20)['号码'].tolist())}")
+                    st.download_button("📥 下载多模型结果", final_df.to_csv(index=False, encoding="utf-8-sig"), f"快乐8_{df.iloc[-1]['期号']}_多模型结果.csv", "text/csv", use_container_width=True)
+
+    with tab6:
+        st.header("📈 命中率复盘")
+        col1, col2 = st.columns(2)
+        with col1:
+            st.subheader("单模型复盘")
+            hit_df = st.session_state.get("hit_summary", pd.DataFrame())
+            if hit_df.empty:
+                st.warning("请先训练单模型")
+            else:
+                m1,m2,m3 = st.columns(3)
+                with m1: st.metric("平均命中", round(hit_df["Top20预测命中个数"].mean(),2))
+                with m2: st.metric("平均命中率", f"{hit_df['命中率'].mean()*100:.1f}%")
+                with m3: st.metric("最高命中", hit_df["Top20预测命中个数"].max())
+                st.line_chart(hit_df, x="期号", y="Top20预测命中个数")
+                st.download_button("📥 单模型复盘", hit_df.to_csv(index=False, encoding="utf-8-sig"), "单模型复盘.csv", "text/csv", use_container_width=True)
+        with col2:
+            st.subheader("多模型复盘")
+            hit_multi_df = st.session_state.get("multi_model_hit_summary", pd.DataFrame())
+            if hit_multi_df.empty:
+                st.warning("请先训练多模型")
+            else:
+                m1,m2,m3 = st.columns(3)
+                with m1: st.metric("平均命中", round(hit_multi_df["Top20预测命中个数"].mean(),2))
+                with m2: st.metric("平均命中率", f"{hit_multi_df['命中率'].mean()*100:.1f}%")
+                with m3: st.metric("最高命中", hit_multi_df["Top20预测命中个数"].max())
+                st.line_chart(hit_multi_df, x="期号", y="Top20预测命中个数")
+                st.download_button("📥 多模型复盘", hit_multi_df.to_csv(index=False, encoding="utf-8-sig"), "多模型复盘.csv", "text/csv", use_container_width=True)
+
+    with tab7:
+        st.header("🎫 普通组合")
+        src = st.radio("数据源", ["单模型", "多模型"], horizontal=True)
+        pred_df = st.session_state.get("predict_result" if src=="单模型" else "final_predict_result", pd.DataFrame())
+        if pred_df.empty:
+            st.warning("请先生成预测结果")
+        else:
+            if st.button("✅ 生成普通组合", type="primary", use_container_width=True):
+                combo_df = generate_low_repeat_combinations(pred_df, select_number_count, generate_group_count, max_repeat_rate)
+                st.dataframe(combo_df, use_container_width=True)
+                st.download_button("📥 下载组合", combo_df.to_csv(index=True, encoding="utf-8-sig"), f"快乐8_{df.iloc[-1]['期号']}_普通组合.csv", "text/csv", use_container_width=True)
+
+    with tab8:
+        st.header("💎 胆拖组合")
+        src = st.radio("胆拖数据源", ["多模型", "单模型"], horizontal=True)
+        pred_df = st.session_state.get("final_predict_result" if src=="多模型" else "predict_result", pd.DataFrame())
+        if pred_df.empty:
+            st.warning("请先生成预测结果")
+        else:
+            if st.checkbox("8+8模式"):
+                dan_count, tuo_count = 8,8
+            if st.button("✅ 生成胆拖组合", type="primary", use_container_width=True):
+                dt_df, dan_p, tuo_p = generate_dantuo_combinations(pred_df, dan_count, tuo_count, dantuo_group_count, max_dan_repeat, max_tuo_repeat)
+                col1, col2 = st.columns(2)
+                with col1: st.subheader("胆码池"); st.write(sorted(dan_p))
+                with col2: st.subheader("拖码池"); st.write(sorted(tuo_p))
+                st.dataframe(dt_df, use_container_width=True)
+                st.download_button("📥 下载胆拖组合", dt_df.to_csv(index=True, encoding="utf-8-sig"), f"快乐8_{df.iloc[-1]['期号']}_胆拖组合.csv", "text/csv", use_container_width=True)
+
  # ===================== 程序入口（直接运行即可启动） =====================
  if __name__ == "__main__":
      build_streamlit_page()
