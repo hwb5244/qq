@@ -359,7 +359,12 @@ def calc_consecutive_stats(num_list):
 # ====================== 底层模块3：号码结构/复盘/预测池 ======================
 def calc_number_structure(numbers, prev_numbers=None):
     """单组号码全维度结构特征计算"""
+    # 【强制清洗】把Pandas/Numpy读出的int64转为原生Python int，根除页面乱码
+    numbers = [int(n) for n in numbers]
+    if prev_numbers is not None:
+        prev_numbers = [int(n) for n in prev_numbers]
     numbers = sorted(numbers)
+
     # 奇偶
     odd = sum(n % 2 for n in numbers)
     even = 20 - odd
@@ -661,12 +666,13 @@ with tab3:
     
     # 周期选择
     window_options = {
-        "近10期": 10,
-        "近20期": 20,
-        "近50期": 50,
-        "近100期": 100,
-        "全量数据": None
-    }
+    "近12期": 12,
+    "近24期": 24,
+    "近60期": 60,
+    "近120期": 120,
+    "150期以上全量汇总": None
+     }
+
     selected_window = st.selectbox("选择分析周期", list(window_options.keys()))
     w = window_options[selected_window]
     
@@ -876,11 +882,29 @@ with tab5:
             st.markdown("### 五、号码结构深度拆解")
             col_s1, col_s2 = st.columns(2)
             with col_s1:
-                st.markdown(f"- **连号**：{review['consecutive'] if review['consecutive'] else '无'}")
-                st.markdown(f"- **重号（与上期）**：{review['repeat'] if review['repeat'] else '无'}（共{review['repeat_count']}个）")
-                st.markdown(f"- **同尾号**：{review['same_tail'] if review['same_tail'] else '无'}（共{review['same_tail_count']}组）")
+                # ========== 新增：预处理所有数据，拼接纯文本，无np标记、不截断 ==========
+# 连号格式化拼接
+                con_show = "、".join(review['consecutive']) if review['consecutive'] else "无"
+# 重号补02格式展示
+                repeat_show = "、".join([f"{x:02d}" for x in review['repeat']]) if review['repeat'] else "无"
+# 斜连号补02格式，解决末尾字符截断
+                oblique_show = "、".join([f"{x:02d}" for x in review['oblique']]) if review['oblique'] else "无"
+
+# 同尾号字典拆解重构，彻底清除np.int64键污染
+                tail_format_list = []
+                for tail_key, tail_nums in review['same_tail'].items():
+                clean_tail = int(tail_key)
+                clean_num_str = "、".join([f"{n:02d}" for n in tail_nums])
+                tail_format_list.append(f"尾{clean_tail}：{clean_num_str}")
+                tail_show = " | ".join(tail_format_list) if tail_format_list else "无"
+
+# ========== 最终页面渲染输出（干净极简，无任何代码残留标记） ==========
+                st.markdown(f"- 连号：{con_show}")
+                st.markdown(f"- 重号（与上期）：{repeat_show}（共{review['repeat_count']}个）")
+                st.markdown(f"- 同尾号：{tail_show}（共{review['same_tail_count']}组）")
+                st.markdown(f"- 斜连号（与上期）：{oblique_show}（共{review['oblique_count']}个）")
+
             with col_s2:
-                st.markdown(f"- **斜连号（与上期）**：{review['oblique'] if review['oblique'] else '无'}（共{review['oblique_count']}个）")
                 st.markdown(f"- **质合比**：{review['prime']}质{review['composite']}合")
                 st.markdown(f"- **和值**：{review['sum']} | **跨度**：{review['span']}")
             
