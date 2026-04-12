@@ -1121,8 +1121,8 @@ with tab4:
             need_odd_cnt = max(round(len(step3_warm_cold)*0.55), len(step4_odd))
             need_zone12_cnt = max(round(len(step3_warm_cold)*0.5), len(step4_zone12))
             step4_final = step4_odd[:need_odd_cnt] + step4_even + step4_zone12[:need_zone12_cnt] + step4_zone34
-            step4_final = list(set(step4_final st.caption(f"步骤4：奇偶/区间适配，剩余候选池：{len(step4_final)}个")
-
+            step4_final = list(set(step4_final))
+            st.caption(f"步骤4：奇偶/区间适配，剩余候选池：{len(step4_final)}个")
             # 步骤5：生成15个核心胆码，按欠开幅度排序
             step5_core = sorted(step4_final, key=lambda x: (-miss_dict.get(x,0), x))[:15]
             st.caption(f"步骤5：生成15个核心胆码，按欠开幅度排序完成")
