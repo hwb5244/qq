@@ -292,15 +292,21 @@ def calc_road(flat):
         t = 1
     return {"r0":r0,"r1":r1,"r2":r2,"r0r":f"{r0/t*100:.1f}%","r1r":f"{r1/t*100:.1f}%","r2r":f"{r2/t*100:.1f}%"}
 def calc_zone(flat):
-    z1=sum(1for n in flat if1<=n<=20)
-    z2=sum(1for n in flat if21<=n<=40)
-    z3=sum(1for n in flat if41<=n<=60)
-    z4=sum(1for n in flat if61<=n<=80)
+    # 全量补齐空格，彻底根治SyntaxError
+    z1 = sum(1 for n in flat if 1 <= n <= 20)
+    z2 = sum(1 for n in flat if 21 <= n <= 40)
+    z3 = sum(1 for n in flat if 41 <= n <= 60)
+    z4 = sum(1 for n in flat if 61 <= n <= 80)
     t = len(flat)
     if t == 0:
         t = 1
-    return {"z1":z1,"z2":z2,"z3":z3,"z4":z4,"z1r":f"{z1/t*100:.1f}%","z2r":f"{z2/t*100:.1f}%","z3r":f"{z3/t*100:.1f}%","z4r":f"{z4/t*100:.1f}%"}
-def calc_con(num_list):
+    return {
+        "z1": z1, "z2": z2, "z3": z3, "z4": z4,
+        "z1r": f"{z1/t*100:.1f}%",
+        "z2r": f"{z2/t*100:.1f}%",
+        "z3r": f"{z3/t*100:.1f}%",
+        "z4r": f"{z4/t*100:.1f}%"
+    }
     clist=[]
     for ns in num_list:
         s,cnt=sorted(ns),0
