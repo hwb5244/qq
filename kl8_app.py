@@ -211,14 +211,35 @@ def validate_numbers(nums):
 
 # ====================== 存档管理核心工具函数 ======================
 def save_predict_num(period, level2_list, level3_list):
-    filename = os.path.join(SAVE_DIR, f"{period}期预测号.csv")
+    """
+    优化版：双重去重+仅存二级/三级号码
+    :param period: 期号
+    :param level2_list: 第二层 二级相随号列表
+    :param level3_list: 第三层 三级跟随号列表
+    :return: 存档文件路径
+    """
+    # 1. 同层级内部去重，剔除空值/非数字异常值
+    level2_unique = sorted(list(set([int(n) for n in level2_list if str(n).strip().isdigit()])))
+    level3_raw = sorted(list(set([int(n) for n in level3_list if str(n).strip().isdigit()])))
+    
+    # 2. 跨层级去重：三级池剔除已在二级池出现的号码，保证全池无重复
+    level3_unique = [n for n in level3_raw if n not in level2_unique]
+    
+    # 3. 生成存档数据，严格仅存二级+三级去重后的号码
     df_save = pd.DataFrame({
-        "期号": [period] * len(level2_list + level3_list),
-        "候选等级": ["二级相随号"] * len(level2_list) + ["三级跟随号"] * len(level3_list),
-        "号码": level2_list + level3_list
+        "期号": [period] * len(level2_unique + level3_unique),
+        "候选等级": ["二级相随号"] * len(level2_unique) + ["三级跟随号"] * len(level3_unique),
+        "号码": level2_unique + level3_unique
     })
+    
+    # 4. 严格按要求命名文件并保存
+    filename = os.path.join(SAVE_DIR, f"{period}期预测号.csv")
     df_save.to_csv(filename, index=False, encoding="utf-8-sig")
-    return filename
+    
+    # 日志返回，方便前端提示
+    st.caption(f"✅ 预测号存档完成：二级{len(level2_unique)}个 | 三级{len(level3_unique)}个 | 合计去重后{len(df_save)}个唯一号码")
+    return filename  
+    
 
 def save_select_comb(period, play_type, comb_list):
     filename = os.path.join(SAVE_DIR, f"{period}期选号组合.csv")
@@ -1464,19 +1485,22 @@ with tab6:
         full_analysis = get_full_analysis_cached(df)
         num_status_dict = get_num_status(full_analysis)
 
-        # 3. 生成分级预测池 + 自动存档
+        # 3. 生成分级预测池 + 双重去重优化 + 严格仅存二级/三级号码
         pool_result = generate_leveled_pool(
             current_nums,
             full_analysis["co_occur_matrix"]["dict"],
             full_analysis["follow_matrix"]["dict"],
             num_status_dict
-        )
+         )
+        # 严格仅提取第二层、第三层号码，不混入第一层本期开奖号
+        level2_raw = list(pool_result["l2"])
+        level3_raw = list(pool_result["l3"])
+        # 调用优化后的去重存档函数
         save_file_path = save_predict_num(
             selected_current_period,
-            list(pool_result["l2"]),
-            list(pool_result["l3"])
-        )
-        st.success(f"✅ 预测池已自动存档完成！保存路径：{save_file_path}")
+            level2_raw,
+            level3_raw
+         )
 
         # 4. 双期数据可视化对比表
         st.divider()
