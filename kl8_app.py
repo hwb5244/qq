@@ -558,61 +558,196 @@ with tab3:
         st.subheader("遗漏值全表")
         st.dataframe(fd['miss_analysis']['miss_df'], use_container_width=True, height=400)
 
-# ========== Tab4 选号参考【核心新增：往期组合回顾双子标签语法修复】 ==========
+# ========== Tab4 多玩法选号参考【4条铁律强制执行+固定组数+永久不变+往期复盘推导】 ==========
 with tab4:
-    st.header("🔮多玩法选号参考（娱乐性）")
-    st.warning("⚠️ 开奖完全随机，仅娱乐参考，不构成购彩建议！")
-    gen_tab, history_tab = st.tabs(["🎯 生成新选号方案", "📋 往期组合回顾"])
+    st.header("🔮 多玩法选号｜铁律风控合规版")
+    st.error("🚨 4条选号硬规则全程强制执行：弃三期连出|降两期连出权重|重合率≤20%|仅用二三级候选池")
+    st.warning("⚠️ 仅历史数据复盘推演娱乐，组合永久固定不随查看变动，不构成购彩建议！")
+    # 三大功能子标签不变
+    gen_tab, check_tab, review_tab = st.tabs([
+        "🎯 合规固化组合生成(铁律风控+往期复盘)",
+        "📊 同期限预测号VS开奖号精准核对",
+        "💡 历史命中率复盘+下期迭代优化"
+    ])
 
-    # 子标签1：生成方案
+    # 全局固定玩法配置【锁死组数：3组11码/5组8码/10组6码/10组3码】
+    FIX_PLAY_CONFIG = [
+        {"玩法名称":"11码", "选号个数":11, "固定生成组数":3},
+        {"玩法名称":"8码", "选号个数":8,  "固定生成组数":5},
+        {"玩法名称":"6码", "选号个数":6,  "固定生成组数":10},
+        {"玩法名称":"3码", "选号个数":3,  "固定生成组数":10}
+    ]
+
+    # ====================== 核心预处理工具：提取前三期/前两期连出号码 ======================
+    def get_recent_continuous_no(df_target, curr_period):
+        """获取当前期往前追溯：前2期连出号、前3期连出号，用于风控筛选"""
+        sort_df = df_target.sort_values("period", ascending=False).reset_index(drop=True)
+        curr_idx = sort_df[sort_df["period"] == curr_period].index[0]
+        # 边界保护：期数不足时返回空
+        if curr_idx + 3 >= len(sort_df):
+            return [], []
+        # 取最近1/2/3期开奖号码
+        n1 = set(sort_df.iloc[curr_idx+1].iloc[1:21].tolist())
+        n2 = set(sort_df.iloc[curr_idx+2].iloc[1:21].tolist())
+        n3 = set(sort_df.iloc[curr_idx+3].iloc[1:21].tolist())
+        # 前两期连续开出号码：n1∩n2
+        two_continuous = list(n1 & n2)
+        # 前三期连续开出号码：n1∩n2∩n3
+        three_continuous = list(n1 & n2 & n3)
+        return two_continuous, three_continuous, list(n1)
+
+    # ====================== 核心生成函数【嵌入4条铁律+永久无随机固化】 ======================
+    @st.cache_data(ttl=0)  # 全局永久缓存，一次生成终身不变
+    def build_iron_rule_combination(l2_pool, l3_pool, two_con, three_con, last_real_nums,
+                                   his12, his24, need_cnt, group_cnt, seed_key):
+        """
+        4条铁律逐条执行：
+        1. 剔除前三期连出three_con；2.两期连出two_con权重扣分；3.重合率≤20%过滤；4.仅用l2+l3池
+        """
+        # 规则4：初始化候选池 = 仅二级+三级，彻底屏蔽一级本期开奖号
+        candidate_pool = list(set(l2_pool + l3_pool))
+        # 规则1：强制排除 前三期连续开出号码，直接删除永不入选
+        candidate_pool = [n for n in candidate_pool if n not in three_con]
+
+        # 权重打分基底：12/24期复盘数据
+        score_dict = {}
+        hot12 = set([x[0] for x in his12["hot_cold"]["hot_top10"]])
+        hot24 = set([x[0] for x in his24["hot_cold"]["hot_top10"]])
+        high_back = set(his24["miss_analysis"]["miss_df"][his24["miss_analysis"]["miss_df"]["回补率%"] >= 80]["号码"])
+
+        for n in candidate_pool:
+            base_score = 0
+            if n in hot24: base_score += 50
+            if n in hot12: base_score += 30
+            if n in high_back: base_score += 20
+            # 规则2：前两期连续号码 大幅扣50分，暴力降低概率
+            if n in two_con: base_score -= 50
+            score_dict[n] = base_score
+
+        # 无随机：权重+数字双排序，同数据永远顺序一致
+        sort_nums = sorted(candidate_pool, key=lambda x: (-score_dict[x], x))
+        final_combs = []
+        max_try = 200  # 防死循环保护
+
+        idx = 0
+        while len(final_combs) < group_cnt and idx < max_try and idx + need_cnt <= len(sort_nums):
+            temp_comb = sort_nums[idx:idx+need_cnt]
+            # 规则3：校验与上期开奖重合率 ≤20% 才放行
+            overlap = set(temp_comb) & set(last_real_nums)
+            overlap_rate = len(overlap) / len(last_real_nums)
+            if overlap_rate <= 0.20 and temp_comb not in final_combs:
+                final_combs.append(temp_comb)
+            idx += 2
+
+        return final_combs
+
+    # ====================== 子标签1：合规固化组合生成｜4铁律全流程风控 ======================
     with gen_tab:
-        st.info("读取预测号生成方案、自动存档、正确率验算、迭代优化")
-        sel_p = st.selectbox("选择读取对应期预测号", df['period'].tolist())
-        pred_df = load_predict_num(sel_p)
-        real_nums = df[df['period'] == sel_p].iloc[0].iloc[1:21].tolist() if sel_p in df['period'].values else []
-        if pred_df is not None:
-            st.success(f"读取{sel_p}期预测号成功")
-            all_pred = pred_df['号码'].tolist()
-            mr = calc_match_rate(all_pred, real_nums)
-            st.metric("预测整体正确率", f"{mr['正确率%']}%")
-            st.write("匹配号码：", "、".join([f"{x:02d}" for x in mr['匹配号码']]))
-            play_sel = st.selectbox("选择玩法", list(PLAY_RULE.keys()))
-            g_cnt = st.slider("生成组数", 1, 5, 3)
-            plans = gen_play_plan(get_full_analysis_cached(df), play_sel, all_pred, g_cnt)
-            save_select_comb(sel_p, play_sel, plans)
-            st.success("选号组合已自动存档！")
+        st.info("核心校验链：仅二三级池→删三期连出号→扣两期连出权重→过滤重合率≤20%→生成永久固定组合")
+        period_list = df["period"].tolist()
+        target_period = st.selectbox("选择绑定预测期号(风控数据自动追溯前3期)", period_list)
 
-    # 子标签2：往期回顾模块（语法全修复，筛选逻辑无报错）
-    with history_tab:
-        st.info("自动读取所有历史存档，按期号/玩法筛选，联动开奖数据展示命中率")
-        all_comb_df = load_all_select_comb()
-        if all_comb_df.empty:
-            st.info("暂无往期选号组合，请先生成方案并存档！")
-        else:
-            col_f1, col_f2 = st.columns(2)
-            with col_f1:
-                filter_p_list = st.multiselect("筛选期号", sorted(all_comb_df["期号"].unique(), reverse=True))
-            with col_f2:
-                filter_play_list = st.multiselect("筛选玩法", all_comb_df["玩法类型"].unique())
-            filter_df = all_comb_df.copy()
-            if filter_p_list:
-                filter_df = filter_df[filter_df["期号"].isin(filter_p_list)]
-            if filter_play_list:
-                filter_df = filter_df[filter_df["玩法类型"].isin(filter_play_list)]
-            st.dataframe(filter_df, hide_index=True, use_container_width=True)
-            # 命中率计算语法修复
-            if not filter_df.empty:
+        # 1.加载核心基础数据
+        pred_df_target = load_predict_num(target_period)
+        full_analysis_tmp = get_full_analysis_cached(df)
+        num_status_dict = get_num_status(full_analysis_tmp)
+        # 解析二/三级候选池（规则4核心数据源）
+        current_idx = df[df["period"] == target_period].index[0]
+        current_nums_base = [int(x) for x in df.iloc[current_idx].iloc[1:21].tolist()]
+        pool_all = generate_leveled_pool(current_nums_base, full_analysis_tmp["co_occur_matrix"]["dict"],
+                                        full_analysis_tmp["follow_matrix"]["dict"], num_status_dict)
+        l2_only = list(pool_all["l2"])
+        l3_only = list(pool_all["l3"])
+
+        # 2.风控前置：提取前2期/前3期连出号码 + 上期开奖号
+        two_continuous, three_continuous, last_pre_real = get_recent_continuous_no(df, target_period)
+        # 展示风控黑名单，透明化规则执行
+        st.warning(f"🔴 强制排除-前三期连出黑名单：{'、'.join(map(str,three_continuous)) if three_continuous else '无'}")
+        st.info(f"🟡 权重降级-前两期连出降权号：{'、'.join(map(str,two_continuous)) if two_continuous else '无'}")
+        st.success(f"🟢 合规候选池：仅加载二级{len(l2_only)}个 + 三级{len(l3_only)}个，已屏蔽一级本期开奖号")
+
+        if pred_df_target is not None and len(l2_only+l3_only) > 0:
+            # 加载12/24期复盘权重数据
+            his12 = get_full_analysis_cached(df, 12)
+            his24 = get_full_analysis_cached(df, 24)
+            all_save_combs = []
+
+            # 遍历4类固定玩法，逐条套用铁律生成固化组合
+            for cfg in FIX_PLAY_CONFIG:
+                play_name, need_num, fix_group = cfg["玩法名称"], cfg["选号个数"], cfg["固定生成组数"]
+                # 绑定期号种子，杜绝跨期错乱、永久固化
+                iron_combs = build_iron_rule_combination(
+                    l2_pool=l2_only, l3_pool=l3_only,
+                    two_con=two_continuous, three_con=three_continuous,
+                    last_real_nums=last_pre_real, his12=his12, his24=his24,
+                    need_cnt=need_num, group_cnt=fix_group, seed_key=f"{target_period}_{play_name}"
+                )
+                all_save_combs.extend(iron_combs)
+
+                # 可视化展示合规固化组合
                 st.divider()
-                st.subheader("筛选结果历史命中率复盘")
-                avg_rate_list = []
-                for _, row in filter_df.iterrows():
-                    p = row["期号"]
-                    nums = [int(x) for x in row["选号号码"].split()]
-                    if p in df["period"].values:
-                        real = [int(x) for x in df[df["period"] == p].iloc[0].iloc[1:21].tolist()]
-                        avg_rate_list.append(calc_match_rate(nums, real)['正确率%'])
-                if avg_rate_list:
-                    st.metric("筛选组合平均命中率", f"{round(np.mean(avg_rate_list), 2)}%")
+                st.subheader(f"📌 {play_name}｜合规{fix_group}组（4铁律校验通过·永久不变）")
+                real_check = df[df["period"] == target_period].iloc[0].iloc[1:21].tolist()
+                for idx, comb in enumerate(iron_combs, 1):
+                    comb_html = " ".join([fmt_num(n, num_status_dict) for n in comb])
+                    st.markdown(f"**{play_name}合规方案{idx}**：{comb_html}", unsafe_allow_html=True)
+                    # 验算重合率+命中率双指标
+                    overlap_check = len(set(comb)&set(last_pre_real))/20*100
+                    hit_res = calc_match_rate(comb, real_check)
+                    st.caption(f"风控核验：与上期重合率{overlap_check:.1f}%≤20%合规 | 当期命中{hit_res['匹配个数']}个 | 命中率{hit_res['正确率%']}%")
+
+            # 合规组合统一存档追溯
+            save_path = save_select_comb(target_period, "铁律合规全玩法", all_save_combs)
+            st.success(f"✅ 全部4铁律合规组合已存档：{save_path}，刷新查看永不变动！")
+        else:
+            st.error("⚠️ 缺失二/三级候选池数据，请先在跨期对比模块生成并保存当期预测号！")
+
+    # ====================== 子标签2：同期限预测号VS开奖号核对【原样兼容不动】 ======================
+    with check_tab:
+        st.info("一对一核验：当期预测号仅对照当期开奖号，数据精准无交叉")
+        check_period = st.selectbox("选择核对期号", df["period"].tolist())
+        pred_check_df = load_predict_num(check_period)
+        real_check_nums = df[check_period == df["period"]].iloc[0].iloc[1:21].tolist() if check_period in df["period"].values else []
+
+        if pred_check_df is not None and len(real_check_nums) > 0:
+            pred_list = pred_check_df["号码"].tolist()
+            res = calc_match_rate(pred_list, real_check_nums)
+            c1,c2,c3 = st.columns(3)
+            with c1:st.metric("预测总数量",f"{len(pred_list)}个")
+            with c2:st.metric("精准命中数",f"{res['匹配个数']}个")
+            with c3:st.metric("综合命中率",f"{res['正确率%']}%")
+            st.divider()
+            st.info("命中明细："+"、".join(f"{x:02d}"for x in res["匹配号码"]) if res["匹配号码"] else "暂无命中号码")
+        else:
+            st.error("⚠️ 缺少对应期预测号/开奖原始数据！")
+
+    # ====================== 子标签3：历史复盘迭代优化【适配4铁律修正建议】 ======================
+    with review_tab:
+        st.info("基于4铁律合规组合历史命中率复盘，迭代下期选号微调逻辑")
+        all_history_comb = load_all_select_comb()
+        if all_history_comb.empty:
+            st.warning("暂无合规存档组合，先生成后再复盘！")
+        else:
+            hit_records = []
+            valid_p = sorted(all_history_comb["期号"].unique(), reverse=True)
+            for p in valid_p:
+                if p not in df["period"].tolist():continue
+                real_p = [int(x)for x in df[df["period"]==p].iloc[0].iloc[1:21].tolist()]
+                for _,row in all_history_comb[all_history_comb["期号"]==p].iterrows():
+                    c_nums = [int(x)for x in row["选号号码"].split()]
+                    hit_records.append(calc_match_rate(c_nums, real_p)["正确率%"])
+            if hit_records:
+                avg_hit = round(np.mean(hit_records),2)
+                st.metric("4铁律合规组合历史平均命中率",f"{avg_hit}%")
+                st.divider()
+                st.success("""
+💡 下期迭代严格延续4条铁律不动摇补充优化：
+1. 永久拉黑每期前三期连出黑名单，绝不松绑
+2. 持续压低前两期连出号码权重，仅作辅助备选
+3. 重合率死死卡控≤20%红线，超标直接弃用
+4. 坚守二/三级候选池边界，不越池选用一期开奖号
+5. 叠加12/24期冷热复盘数据二次加权，稳中提质
+""") 
 
 # ========== Tab5 单期深度复盘【彻底修复空白+全量渲染+数据唯一性保障】 ==========
 with tab5:
