@@ -1882,4 +1882,4 @@ with tab8:
 
 # ====================== 全局尾部合规声明（顶格无缩进，语法闭合版） ======================
 st.divider()
-st.markdown("""<div style="text-align:center;color:#666;font-size:14px">温馨提示：本系统仅历史数据统计娱乐，彩票开奖完全随机，不构成任何购彩建议，理性购彩遵守国家法规</div>""", unsafe_allow_html=True)
+st.markdown('<div style="text-align:center;color:#666;font-size:14px">温馨提示:本系统仅历史数据统计娱乐,彩票开奖完全随机,不构成购彩建议,理性购彩遵守法规</div>', unsafe_allow_html=True)  
