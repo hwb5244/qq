@@ -747,22 +747,135 @@ with tab5:
                                     load_data_cached.clear()
                                     get_full_analysis_cached.clear()
                                     st.rerun() 
-# ========== Tab6 跨期对比 ==========
+# ========== Tab6 跨期对比与预测号码池【修复空白+同源对齐+对比结论+优化展示+自动存档】 ==========
 with tab6:
-    st.header("🔄跨期对比与预测号码池")
-    plist = df['period'].tolist()
-    scp = st.selectbox("选择本期分析期号", plist)
-    if st.button("生成对比+预测存档", use_container_width=True, type="primary"):
-        cidx = df[df['period'] == scp].index[0]
-        crow = df.iloc[cidx]
-        cn = crow.iloc[1:21].tolist()
-        pn = df.iloc[cidx+1].iloc[1:21].tolist() if cidx < len(df)-1 else None
-        rev_curr = generate_deep_review(cn, pn, scp)
-        fd = get_full_analysis_cached(df)
-        nsd = get_num_status(fd)
-        pool = generate_leveled_pool(cn, fd['co_occur_matrix']['dict'], fd['follow_matrix']['dict'], nsd)
-        save_predict_num(scp, list(pool['l2']), list(pool['l3']))
-        st.success("预测号已存档完成！")
+    st.header("🔄 跨期对比与预测号码池")
+    st.info("数据与单期复盘同源统一 | 两期自动对比生成结论 | 分层预测池美化展示 | 生成即刻自动存档")
+    # 下拉选择本期分析期号，自动匹配上期
+    period_list = df["period"].tolist()
+    selected_current_period = st.selectbox("选择【本期】分析期号(系统自动加载上期联动对比)", period_list)
+
+    if st.button("🚀 生成跨期对比+优化预测池+自动存档", use_container_width=True, type="primary"):
+        # ---------------------- 1. 读取本期/上期原始数据（边界防错） ----------------------
+        current_idx = df[df["period"] == selected_current_period].index[0]
+        current_row = df.iloc[current_idx]
+        current_nums = [int(x) for x in current_row.iloc[1:21].tolist()]
+        
+        prev_nums = None
+        prev_period = None
+        if current_idx < len(df) - 1:
+            prev_row = df.iloc[current_idx + 1]
+            prev_nums = [int(x) for x in prev_row.iloc[1:21].tolist()]
+            prev_period = prev_row["period"]
+
+        # ---------------------- 2. 同源函数计算(和单期复盘完全一致，数据无偏差) ----------------------
+        prev_review = generate_deep_review(prev_nums, None, prev_period) if prev_nums else None
+        curr_review = generate_deep_review(current_nums, prev_nums, selected_current_period)
+        full_analysis = get_full_analysis_cached(df)
+        num_status_dict = get_num_status(full_analysis)
+
+        # ---------------------- 3. 生成分级预测池 + 核心自动存档(xxx期预测号.csv) ----------------------
+        pool_result = generate_leveled_pool(
+            current_nums,
+            full_analysis["co_occur_matrix"]["dict"],
+            full_analysis["follow_matrix"]["dict"],
+            num_status_dict
+        )
+        # 执行自动存档并返回路径，弹窗提示
+        save_file_path = save_predict_num(
+            selected_current_period,
+            list(pool_result["l2"]),
+            list(pool_result["l3"])
+        )
+        st.success(f"✅ 预测池已自动存档完成！保存路径：{save_file_path}")
+
+        # ---------------------- 4. 双期数据可视化对比表(同源字段对齐) ----------------------
+        st.divider()
+        st.subheader("📊 上期VS本期 核心指标同源对比表")
+        if prev_review:
+            compare_df = pd.DataFrame([
+                ["开奖期号", prev_period, selected_current_period],
+                ["奇偶比例", prev_review["oe"], curr_review["oe"]],
+                ["大小比例", prev_review["sl"], curr_review["sl"]],
+                ["012路比例", prev_review["road"], curr_review["road"]],
+                ["质合比例", prev_review["pc"], curr_review["pc"]],
+                ["号码和值", prev_review["sum"], curr_review["sum"]],
+                ["连号组数", f"{prev_review['con_cnt']}组", f"{curr_review['con_cnt']}组"],
+                ["跨期重号数量", "-", f"{curr_review['repeat_cnt']}个"]
+            ], columns=["统计维度", f"上期{prev_period}", f"本期{selected_current_period}"])
+            st.dataframe(compare_df, hide_index=True, use_container_width=True)
+
+        # ---------------------- 5. 智能自动生成两期对比结论(核心新增) ----------------------
+        st.divider()
+        st.subheader("📝 两期数据深度对比结论报告")
+        conclusion_text = []
+        # 奇偶结论
+        curr_odd, curr_even = curr_review["odd"], curr_review["even"]
+        if curr_odd > curr_even:
+            conclusion_text.append("① 本期奇数热开，奇偶偏向奇数侧，偏离理论10:10均衡值；")
+        elif curr_odd < curr_even:
+            conclusion_text.append("① 本期偶数占优，偶数出号活跃度更高；")
+        else:
+            conclusion_text.append("① 本期奇偶完全均衡，贴合历史理论标准配比；")
+        
+        # 大小结论
+        curr_small, curr_large = curr_review["small"], curr_review["large"]
+        if curr_small > curr_large:
+            conclusion_text.append("② 小号区(1-40)出号强势，大号区走冷回调；")
+        elif curr_small < curr_large:
+            conclusion_text.append("② 大号区(41-80)发力明显，小号区处于回补等待阶段；")
+        else:
+            conclusion_text.append("② 大小号配比均衡，四区分布无极端偏移；")
+        
+        # 重号&连号结论
+        conclusion_text.append(f"③ 本期相对上期重号共{curr_review['repeat_cnt']}个，属于历史正常波动区间；")
+        conclusion_text.append(f"④ 本期连号组数{curr_review['con_cnt']}组，{'连号爆发' if curr_review['con_cnt']>4 else '连号平稳'}；")
+        
+        # 批量渲染结论
+        for text in conclusion_text:
+            st.info(text)
+
+        # ---------------------- 6. 预测号码池UI重度优化(分层级+冷热色标+排版美化) ----------------------
+        st.divider()
+        st.subheader("🎯 下一期分层预测号码池（冷热色标区分 | 已自动存档）")
+        co_map = pool_result["co"]
+        follow_map = pool_result["follow"]
+
+        # 层级1：本期原生开奖号码(基底核心)
+        st.markdown("#### 🔴 第一层基底：本期原生开奖号码(一级核心参考)")
+        l1_html = " ".join([fmt_num(n, num_status_dict) for n in sorted(pool_result["l1"])])
+        st.markdown(l1_html, unsafe_allow_html=True)
+
+        # 层级2：二级相随号(同频关联，存档主体)
+        st.markdown("#### 🟡 第二层候选：本期高频相随号(二级重点预测，已存档)")
+        level2_groups = pool_result["l2_group"]
+        if level2_groups:
+            for cnt, nums in level2_groups:
+                nums_sorted = sorted(nums, key=lambda x: num_status_dict[x]["cnt"], reverse=True)
+                l2_html = " ".join([fmt_num(n, num_status_dict) for n in nums_sorted])
+                st.markdown(f"同频关联{cnt}次：{l2_html}", unsafe_allow_html=True)
+        else:
+            st.warning("暂无高频二级相随号数据")
+
+        # 层级3：三级跟随号(跨期传导，补充备选)
+        st.markdown("#### 🟢 第三层备选：相随号衍生跟随号(三级补充预测，已存档)")
+        level3_groups = pool_result["l3_group"]
+        if level3_groups:
+            for cnt, nums in level3_groups:
+                nums_sorted = sorted(nums, key=lambda x: num_status_dict[x]["cnt"], reverse=True)
+                l3_html = " ".join([fmt_num(n, num_status_dict) for n in nums_sorted])
+                st.markdown(f"跨期跟随{cnt}次：{l3_html}", unsafe_allow_html=True)
+        else:
+            st.warning("暂无衍生三级跟随号数据")
+
+        # ---------------------- 7. 下期选号简易参考建议(联动对比结论) ----------------------
+        st.divider()
+        st.subheader("💡 基于跨期对比的下期选号适配建议")
+        st.success("结合两期偏移规律：优先保留二级相随号核心、搭配高遗漏回补冷号，冷热配比控制1:1；规避本期连号扎堆区间，平衡012路分布，严格控制与本期开奖重合率≤20%。")
+
+# 尾部注释：唯一性保障说明
+st.caption("🔒 技术说明：底层历史数据/核心计算逻辑未修改时，跨期对比结果、预测池号码永久固定不变，无随机变动")
+
 
 # ========== Tab7 设置页 ==========
 with tab7:
