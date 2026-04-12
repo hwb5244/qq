@@ -893,9 +893,9 @@ with tab5:
 # 同尾号字典拆解重构，彻底清除np.int64键污染
                 tail_format_list = []
                 for tail_key, tail_nums in review['same_tail'].items():
-                clean_tail = int(tail_key)
-                clean_num_str = "、".join([f"{n:02d}" for n in tail_nums])
-                tail_format_list.append(f"尾{clean_tail}：{clean_num_str}")
+                    clean_tail = int(tail_key)
+                    clean_num_str = "、".join([f"{n:02d}" for n in tail_nums])
+                    tail_format_list.append(f"尾{clean_tail}：{clean_num_str}")
                 tail_show = " | ".join(tail_format_list) if tail_format_list else "无"
 
 # ========== 最终页面渲染输出（干净极简，无任何代码残留标记） ==========
