@@ -1092,32 +1092,20 @@ with tab4:
                         label="📥 下载筛选后的选号组合汇总CSV",
                         data=csv_batch_data,
                         file_name="快乐8往期选号组合汇总.csv",
-                        mime="text/csv",
-                        use_container_width=True
-                    )
-                with col_down2:
-                    # 单期详情筛选
-with col_filter2:
+                                    # 严格4空格缩进！修复with col_filter2缩进缺失BUG
+            with col_filter2:
                 filter_play = st.multiselect(
                     "按玩法类型筛选",
                     options=sorted(all_comb_df["玩法类型"].unique()),
                     default=sorted(all_comb_df["玩法类型"].unique())
                 )
 
-            # 筛选数据
+            # 筛选逻辑
             filtered_df = all_comb_df[
                 (all_comb_df["期号"].isin(filter_period)) &
                 (all_comb_df["玩法类型"].isin(filter_play))
             ].sort_values("期号", ascending=False).reset_index(drop=True)
 
-            st.divider()
-            st.subheader("📊 往期选号组合总览表")
-            st.dataframe(filtered_df, hide_index=True, use_container_width=True, height=300)
-
-            # 详情查看与下载
-            if not filtered_df.empty:
-                col_down1, col_down2 = st.columns(2)
-                with col_down1:
                     csv_batch = filtered_df.to_csv(index=False, encoding="utf-8-sig")
                     st.download_button(
                         "📥 下载筛选组合CSV", csv_batch, "快乐8往期选号汇总.csv", use_container_width=True
