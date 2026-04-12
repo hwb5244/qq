@@ -314,7 +314,21 @@ def calc_zone(flat):
             if s[i]==s[i-1]+1:
                 cnt+=1
         clist.append(cnt)
-    return {"avg":np.mean(clist)if clist else0,"max":max(clist)if clist else0,"min":min(clist)if clist else0}
+    def calc_con(num_list):
+    clist = []
+    for ns in num_list:
+        s, cnt = sorted(ns), 0
+        for i in range(1, 20):
+            if s[i] == s[i-1] + 1:
+                cnt += 1
+        clist.append(cnt)
+    # 补齐三元表达式所有空格，彻底消除语法歧义
+    return {
+        "avg": np.mean(clist) if clist else 0,
+        "max": max(clist) if clist else 0,
+        "min": min(clist) if clist else 0
+    }
+
 
 # ====================== 同源核心函数+预测生成+格式化（修复np.int64类型溢出） ======================
 def calc_number_structure(numbers, prev_numbers=None):
