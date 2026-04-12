@@ -597,35 +597,39 @@ with tab4:
         return two_continuous, three_continuous, list(n1)
 
     # ====================== 核心生成函数【嵌入4条铁律+永久无随机固化】 ======================
-    @st.cache_data(ttl=0)
-    def build_iron_rule_combination(l2_pool, l3_pool, two_con, three_con, last_real_nums, hot12_list, hot24_list, df_back, need_cnt, group_cnt, seed_key):
-        candidate_pool = list(set(l2_pool + l3_pool))
-        candidate_pool = [n for n in candidate_pool if n not in three_con]
-        df_back["temp_num"] = df_back["回补率%"].str.replace("%", "").astype(float)          high_back = set(df_back[df_back["temp_num"] >= 80]["号码"])
-        score_dict = {}
-        hot12 = set(hot12_list)
-        hot24 = set(hot24_list)
-        for n in candidate_pool:
-            s = 0
-           if n in hot24:
-              s += 50
-           if n in hot12:
-              s += 30
-           if n in high_back:
-              s += 20
-           if n in two_con:
-              s -= 50
-           score_dict[n] = s
-       sort_nums = sorted(candidate_pool, key=lambda x: (-score_dict[x], x))
-       final_combs = []
-       idx = 0
-       while len(final_combs) < group_cnt and idx + need_cnt <= len(sort_nums):
-           t = sort_nums[idx:idx+need_cnt]
-           overlap_rate = len(set(t) & set(last_real_nums)) / 20
-           if overlap_rate <= 0.2 and t not in final_combs:
-               final_combs.append(t)
-           idx += 2
-       return final_combs
+@st.cache_data(ttl=0)
+def build_iron_rule_combination(l2_pool, l3_pool, two_con, three_con, last_real_nums, hot12_list, hot24_list, df_back, need_cnt, group_cnt, seed_key):
+    candidate_pool = list(set(l2_pool + l3_pool))
+    candidate_pool = [n for n in candidate_pool if n not in three_con]
+    
+    df_back["temp_num"] = df_back["回补率%"].str.replace("%", "").astype(float)
+    high_back = set(df_back[df_back["temp_num"] >= 80]["号码"])
+    
+    score_dict = {}
+    hot12 = set(hot12_list)
+    hot24 = set(hot24_list)
+    for n in candidate_pool:
+        s = 0
+        if n in hot24:
+            s += 50
+        if n in hot12:
+            s += 30
+        if n in high_back:
+            s += 20
+        if n in two_con:
+            s -= 50
+        score_dict[n] = s
+    
+    sort_nums = sorted(candidate_pool, key=lambda x: (-score_dict[x], x))
+    final_combs = []
+    idx = 0
+    while len(final_combs) < group_cnt and idx + need_cnt <= len(sort_nums):
+        t = sort_nums[idx:idx+need_cnt]
+        overlap_rate = len(set(t) & set(last_real_nums)) / 20
+        if overlap_rate <= 0.2 and t not in final_combs:
+            final_combs.append(t)
+        idx += 2
+    return final_combs
 
         """
         4条铁律逐条执行：
