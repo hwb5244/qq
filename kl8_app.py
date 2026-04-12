@@ -22,6 +22,15 @@ SAVE_DIR = "lottery_save"  # 存档总目录：存放预测号/选号组合
 if not os.path.exists(SAVE_DIR):
     os.makedirs(SAVE_DIR)
 
+# ====================== 新增：批量复盘全局存档配置 ======================
+BATCH_REVIEW_DIR = os.path.join(ARCHIVE_ROOT, "06_全量批量复盘存档")
+BATCH_REVIEW_SUMMARY = os.path.join(BATCH_REVIEW_DIR, "全量期数复盘总表.csv")
+BATCH_REVIEW_DETAIL_DIR = os.path.join(BATCH_REVIEW_DIR, "单期复盘明细")
+# 自动创建目录
+for dir_path in [BATCH_REVIEW_DIR, BATCH_REVIEW_DETAIL_DIR]:
+    if not os.path.exists(dir_path):
+        os.makedirs(dir_path) 
+
 # 1-80质数固定列表
 PRIME_NUMBERS = [2,3,5,7,11,13,17,19,23,29,31,37,41,43,47,53,59,61,67,71,73,79]
 ZONE_RULE = {"zone1":[1,20],"zone2":[21,40],"zone3":[41,60],"zone4":[61,80]}
@@ -512,6 +521,174 @@ def gen_play_plan(full, play, predict_nums, cnt=3):
         res = sorted(list(set(base)))[:need]
         plans.append(res)
     return plans 
+
+# ====================== 新增：全量批量自动复盘核心函数 ======================
+def batch_auto_review_all_periods(df, overwrite_exist=False):
+    """
+    全量期数自动批量复盘核心函数
+    执行逻辑：按期号正序（从旧到新）处理 → 单期深度复盘 → 跨期对比生成预测池 → 4铁律生成选号组合
+    返回：处理结果统计DataFrame
+    """
+    # 期号正序排序（从最早的2026001到最新期，保证跨期对比能拿到上期数据）
+    sort_df = df.sort_values("period", ascending=True).reset_index(drop=True)
+    total_periods = len(sort_df)
+    result_list = []
+    fail_list = []
+
+    # 循环处理每一期
+    for idx, row in sort_df.iterrows():
+        period = row["period"]
+        period_num = int(period)
+        current_nums = [int(x) for x in row.iloc[1:21].tolist()]
+        detail_file = os.path.join(BATCH_REVIEW_DETAIL_DIR, f"{period}期_复盘明细.csv")
+        predict_file = os.path.join(SAVE_DIR, f"{period}期预测号.csv")
+        comb_file = os.path.join(SAVE_DIR, f"{period}期选号组合.csv")
+
+        # 增量模式：已存在文件跳过，提升速度
+        if not overwrite_exist and os.path.exists(detail_file) and os.path.exists(predict_file) and os.path.exists(comb_file):
+            result_list.append({
+                "期号": period,
+                "处理状态": "已跳过(已存在)",
+                "单期复盘": "已完成",
+                "跨期预测池": "已完成",
+                "4铁律选号组合": "已完成"
+            })
+            continue
+
+        # 初始化状态
+        review_status = "未执行"
+        predict_status = "未执行"
+        comb_status = "未执行"
+        try:
+            # ---------------------- 1. 单期深度复盘 ----------------------
+            # 获取上期数据
+            prev_nums = None
+            if idx > 0:
+                prev_row = sort_df.iloc[idx-1]
+                prev_nums = [int(x) for x in prev_row.iloc[1:21].tolist()]
+            # 生成复盘数据
+            review_result = generate_deep_review(current_nums, prev_nums, period)
+            # 单期明细存档
+            review_df = pd.DataFrame([{
+                "期号": review_result["period"],
+                "开奖号码": " ".join([f"{x:02d}" for x in review_result["nums"]]),
+                "奇偶比例": review_result["oe"],
+                "大小比例": review_result["sl"],
+                "012路比例": review_result["road"],
+                "质合比例": review_result["pc"],
+                "号码和值": review_result["sum"],
+                "区间跨度": review_result["span"],
+                "连号组数": review_result["con_cnt"],
+                "连号明细": "、".join(review_result["con"]),
+                "跨期重号数": review_result["repeat_cnt"],
+                "重号明细": " ".join([f"{x:02d}" for x in review_result["repeat"]]),
+                "同尾组数": review_result["tail_cnt"],
+                "同尾明细": str(review_result["tail"])
+            }])
+            review_df.to_csv(detail_file, index=False, encoding="utf-8-sig")
+            review_status = "已完成"
+
+            # ---------------------- 2. 跨期对比+预测号池生成（从第2期开始） ----------------------
+            if idx >= 1:
+                full_analysis = get_full_analysis_cached(df)
+                num_status_dict = get_num_status(full_analysis)
+                # 生成分级预测池
+                pool_result = generate_leveled_pool(
+                    current_nums,
+                    full_analysis["co_occur_matrix"]["dict"],
+                    full_analysis["follow_matrix"]["dict"],
+                    num_status_dict
+                )
+                # 自动存档预测号
+                save_predict_num(period, list(pool_result["l2"]), list(pool_result["l3"]))
+                predict_status = "已完成"
+            else:
+                predict_status = "跳过(无上期数据)"
+
+            # ---------------------- 3. 4铁律选号组合生成（从第4期开始，需要前三期数据） ----------------------
+            if idx >= 3:
+                # 加载所需基础数据
+                his12 = get_full_analysis_cached(df, 12)
+                his24 = get_full_analysis_cached(df, 24)
+                # 提取连出黑名单
+                n1 = set(sort_df.iloc[idx-1].iloc[1:21].tolist())
+                n2 = set(sort_df.iloc[idx-2].iloc[1:21].tolist())
+                n3 = set(sort_df.iloc[idx-3].iloc[1:21].tolist())
+                two_continuous = list(n1 & n2)
+                three_continuous = list(n1 & n2 & n3)
+                last_pre_real = list(n1)
+                # 加载预测池
+                pred_df = load_predict_num(period)
+                if pred_df is not None and not pred_df.empty and "号码" in pred_df.columns:
+                    l2_only = pred_df[pred_df["候选等级"] == "二级相随号"]["号码"].tolist()
+                    l3_only = pred_df[pred_df["候选等级"] == "三级跟随号"]["号码"].tolist()
+                    # 基础参数
+                    hot12_plain = [x[0] for x in his12.get("hot_cold", {}).get("hot_top10", [])]
+                    hot24_plain = [x[0] for x in his24.get("hot_cold", {}).get("hot_top10", [])]
+                    df_back_plain = his24.get("miss_analysis", {}).get("miss_df", pd.DataFrame({"回补率%": [], "号码": []}))
+                    # 固定组数配置
+                    FIX_PLAY_CONFIG = [
+                        {"玩法名称":"11码", "选号个数":11, "固定生成组数":3},
+                        {"玩法名称":"8码", "选号个数":8,  "固定生成组数":5},
+                        {"玩法名称":"6码", "选号个数":6,  "固定生成组数":10},
+                        {"玩法名称":"3码", "选号个数":3,  "固定生成组数":10}
+                    ]
+                    # 生成所有玩法组合
+                    all_combs = []
+                    for cfg in FIX_PLAY_CONFIG:
+                        play_name = cfg["玩法名称"]
+                        need_num = cfg["选号个数"]
+                        fix_group = cfg["固定生成组数"]
+                        combs = build_iron_rule_combination(
+                            l2_pool=l2_only,
+                            l3_pool=l3_only,
+                            two_con=two_continuous,
+                            three_con=three_continuous,
+                            last_real_nums=last_pre_real,
+                            hot12_list=hot12_plain,
+                            hot24_list=hot24_plain,
+                            df_back=df_back_plain,
+                            need_cnt=need_num,
+                            group_cnt=fix_group,
+                            seed_key=f"{period}_{play_name}"
+                        )
+                        all_combs.extend(combs)
+                    # 存档组合
+                    if all_combs:
+                        save_select_comb(period, "批量自动生成-4铁律合规", all_combs)
+                        comb_status = "已完成"
+                    else:
+                        comb_status = "生成失败(候选池不足)"
+            else:
+                comb_status = "跳过(无前三期数据)"
+
+            # 记录处理结果
+            result_list.append({
+                "期号": period,
+                "处理状态": "处理成功",
+                "单期复盘": review_status,
+                "跨期预测池": predict_status,
+                "4铁律选号组合": comb_status
+            })
+
+        except Exception as e:
+            # 异常捕获，单期报错不中断整体
+            fail_list.append(f"{period}期：{str(e)}")
+            result_list.append({
+                "期号": period,
+                "处理状态": "处理失败",
+                "单期复盘": review_status,
+                "跨期预测池": predict_status,
+                "4铁律选号组合": comb_status,
+                "失败原因": str(e)
+            })
+
+    # 生成总表并存档
+    result_df = pd.DataFrame(result_list)
+    result_df.to_csv(BATCH_REVIEW_SUMMARY, index=False, encoding="utf-8-sig")
+    return result_df, fail_list   
+    
+
 # ====================== 全局初始化 ======================
 df = load_data_cached()
 total = len(df)
@@ -1194,6 +1371,86 @@ with tab7:
                 st.rerun()
             else:
                 st.error("请勾选确认框后再执行")
+
+# ========== Tab8 全量批量自动复盘 ==========
+with tab8:
+    st.header("📦 全量期数一键自动复盘系统")
+    st.info("自动完成88期全量数据的「单期深度复盘+跨期对比预测池+4铁律选号组合」生成，结果永久存档，后期随时可调用")
+    st.divider()
+
+    # 操作配置区
+    c1, c2 = st.columns(2)
+    with c1:
+        overwrite_mode = st.checkbox("覆盖已存在的存档数据（增量模式不勾选，全量重算勾选）", value=False)
+    with c2:
+        st.metric("当前可处理总期数", f"{len(df)}期")
+
+    # 执行按钮
+    run_batch = st.button("🚀 开始全量自动复盘", use_container_width=True, type="primary")
+    st.divider()
+
+    # 执行逻辑
+    if run_batch:
+        with st.spinner("正在全量批量处理中，请勿刷新页面..."):
+            result_df, fail_list = batch_auto_review_all_periods(df, overwrite_exist=overwrite_mode)
+            
+            # 处理结果展示
+            st.subheader("✅ 处理完成结果总览")
+            success_cnt = len(result_df[result_df["处理状态"] == "处理成功"])
+            skip_cnt = len(result_df[result_df["处理状态"] == "已跳过(已存在)"])
+            fail_cnt = len(result_df[result_df["处理状态"] == "处理失败"])
+            
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("处理成功", f"{success_cnt}期")
+            with col2:
+                st.metric("已跳过", f"{skip_cnt}期")
+            with col3:
+                st.metric("处理失败", f"{fail_cnt}期")
+
+            # 结果明细表格
+            st.dataframe(result_df, hide_index=True, use_container_width=True, height=400)
+
+            # 失败明细
+            if fail_list:
+                st.divider()
+                st.error("❌ 处理失败期号明细")
+                for fail in fail_list:
+                    st.write(fail)
+
+            # 下载按钮
+            st.divider()
+            with open(BATCH_REVIEW_SUMMARY, "rb") as f:
+                st.download_button(
+                    label="📥 下载全量复盘总表CSV",
+                    data=f.read(),
+                    file_name="快乐8全量期数复盘总表.csv",
+                    mime="text/csv",
+                    use_container_width=True
+                )
+
+    # 历史存档查看区
+    st.divider()
+    st.subheader("📋 历史批量复盘存档查看")
+    if os.path.exists(BATCH_REVIEW_SUMMARY):
+        history_df = pd.read_csv(BATCH_REVIEW_SUMMARY, encoding="utf-8-sig")
+        st.dataframe(history_df, hide_index=True, use_container_width=True, height=300)
+        # 单期明细查看
+        st.subheader("🔍 单期复盘明细查询")
+        sel_period = st.selectbox("选择要查看的期号", df["period"].tolist())
+        detail_file = os.path.join(BATCH_REVIEW_DETAIL_DIR, f"{sel_period}期_复盘明细.csv")
+        if os.path.exists(detail_file):
+            detail_df = pd.read_csv(detail_file, encoding="utf-8-sig")
+            st.dataframe(detail_df, hide_index=True, use_container_width=True)
+            with open(detail_file, "rb") as f:
+                st.download_button(f"下载{sel_period}期复盘明细", f.read(), file_name=f"{sel_period}期_复盘明细.csv", mime="text/csv")
+        else:
+            st.warning("该期暂无复盘明细，请先执行批量复盘")
+    else:
+        st.info("暂无批量复盘存档，请先点击「开始全量自动复盘」生成数据")   
+
+
+
 
 
 # ====================== 全局尾部合规声明（语法闭合无遗漏） ======================
