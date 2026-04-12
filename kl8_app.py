@@ -15,12 +15,39 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# ====================== 全局常量定义（统一管理无硬编码） ======================
+# ====================== 全局常量定义（统一管理无硬编码，执行顺序100%正确） ======================
+# 核心数据路径（先定义基础路径，再定义衍生路径，避免未定义错误）
 DATA_FILE = "kl8_history_data.csv"
 SAVE_DIR = "lottery_save"  # 存档总目录：存放预测号/选号组合
-# 初始化存档文件夹，避免首次运行报错
-if not os.path.exists(SAVE_DIR):
-    os.makedirs(SAVE_DIR)
+ARCHIVE_ROOT = os.path.join(os.getcwd(), "KL8_Lottery_Data_Archive")  # 外置存档根目录
+INDEX_FILE = os.path.join(ARCHIVE_ROOT, "05_存档总索引表", "index.csv")  # 全局索引文件
+
+# 新增：批量复盘全局存档配置（必须放在ARCHIVE_ROOT定义之后，否则会报未定义）
+BATCH_REVIEW_DIR = os.path.join(ARCHIVE_ROOT, "06_全量批量复盘存档")
+BATCH_REVIEW_SUMMARY = os.path.join(BATCH_REVIEW_DIR, "全量期数复盘总表.csv")
+BATCH_REVIEW_DETAIL_DIR = os.path.join(BATCH_REVIEW_DIR, "单期复盘明细")
+
+# 业务规则常量
+PRIME_NUMBERS = [2,3,5,7,11,13,17,19,23,29,31,37,41,43,47,53,59,61,67,71,73,79]
+ZONE_RULE = {"zone1":[1,20],"zone2":[21,40],"zone3":[41,60],"zone4":[61,80]}
+HOT_COLD_FACTOR = 2
+PLAY_RULE = {"选10":10,"选8":8,"选7":7,"选5":5,"选20":20}
+
+# 统一初始化所有文件夹（所有路径定义完成后，再创建目录，避免路径不存在）
+for dir_path in [
+    SAVE_DIR, 
+    ARCHIVE_ROOT, 
+    os.path.join(ARCHIVE_ROOT, "01_基准原始库"),
+    os.path.join(ARCHIVE_ROOT, "02_增量开奖数据库"),
+    os.path.join(ARCHIVE_ROOT, "03_每期预测号存档库"),
+    os.path.join(ARCHIVE_ROOT, "04_每期选号组合存档库"),
+    os.path.join(ARCHIVE_ROOT, "05_存档总索引表"),
+    BATCH_REVIEW_DIR, 
+    BATCH_REVIEW_DETAIL_DIR
+]:
+    if not os.path.exists(dir_path):
+        os.makedirs(dir_path)  
+        
 
 # ====================== 新增：批量复盘全局存档配置 ======================
 BATCH_REVIEW_DIR = os.path.join(ARCHIVE_ROOT, "06_全量批量复盘存档")
