@@ -631,10 +631,10 @@ def build_iron_rule_combination(l2_pool, l3_pool, two_con, three_con, last_real_
         idx += 2
     return final_combs
 
-        """
+        
         4条铁律逐条执行：
         1. 剔除前三期连出three_con；2.两期连出two_con权重扣分；3.重合率≤20%过滤；4.仅用l2+l3池
-        """
+
         # 规则4：初始化候选池 = 仅二级+三级，彻底屏蔽一级本期开奖号
         candidate_pool = list(set(l2_pool + l3_pool))
         # 规则1：强制排除 前三期连续开出号码，直接删除永不入选
