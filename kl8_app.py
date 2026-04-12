@@ -1,13 +1,12 @@
-# ====================== 核心依赖库 ======================
+# ====================== 核心依赖库（无多余导入，全用到）======================
 import streamlit as st
 import pandas as pd
 import numpy as np
 from collections import Counter, defaultdict
 import os
 import csv
-import datetime
 
-# ====================== 页面基础配置 ======================
+# ====================== 页面基础配置（Streamlit规范，必须为首行执行代码）======================
 st.set_page_config(
     page_title="快乐8专业数据分析系统",
     page_icon="🎰",
@@ -15,20 +14,20 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# ====================== 全局常量定义 ======================
+# ====================== 全局常量定义（统一管理，无硬编码）======================
 DATA_FILE = "kl8_history_data.csv"
-SAVE_DIR = "lottery_save"  # 存档总目录：存放预测号/选号组合
-# 初始化存档文件夹
+SAVE_DIR = "lottery_save"  # 存档目录：预测号/选号组合统一存放
+# 自动创建存档目录，避免首次运行报错
 if not os.path.exists(SAVE_DIR):
     os.makedirs(SAVE_DIR)
 
-# 1-80质数列表
+# 数学定义常量
 PRIME_NUMBERS = [2,3,5,7,11,13,17,19,23,29,31,37,41,43,47,53,59,61,67,71,73,79]
 ZONE_RULE = {"zone1":[1,20],"zone2":[21,40],"zone3":[41,60],"zone4":[61,80]}
 HOT_COLD_FACTOR = 2
 PLAY_RULE = {"选10":10,"选8":8,"选7":7,"选5":5,"选20":20}
 
-# ====================== 88期原始基准数据 ======================
+# ====================== 88期原始基准数据（100%完整保留，初始化/重置自动还原）======================
 INIT_DATA = [
 ["2026001",2,5,6,11,24,25,27,32,34,35,39,41,44,51,54,62,70,71,72,75],
 ["2026002",3,8,10,17,22,24,25,28,39,51,61,62,67,69,70,71,72,73,74,80],
@@ -120,7 +119,7 @@ INIT_DATA = [
 ["2026088",8,9,13,14,18,22,25,33,39,40,44,46,49,55,64,66,68,71,77,80]
 ]
 
-# ====================== 缓存装饰器 ======================
+# ====================== 缓存装饰器（Streamlit性能优化，无缓存污染）======================
 @st.cache_data(ttl=3600)
 def load_data_cached():
     return load_data()
@@ -129,398 +128,526 @@ def load_data_cached():
 def get_full_analysis_cached(df, window=None):
     return analyze_full_data(df, window)
 
-# ====================== 新增：存档工具函数（核心！实现预测号/选号组合保存） ======================
+# ====================== 工具函数：存档/读取/正确率计算 ======================
 def save_predict_num(period, level2_list, level3_list):
-    """保存二/三级候选为 xxx期预测号.csv"""
+    """保存二/三级预测号为「xxx期预测号.csv」"""
     filename = os.path.join(SAVE_DIR, f"{period}期预测号.csv")
     df_save = pd.DataFrame({
-        "期号":[period]*len(level2_list+level3_list),
-        "候选等级":["二级相随号"]*len(level2_list) + ["三级跟随号"]*len(level3_list),
-        "号码":level2_list+level3_list
+        "期号": [period] * len(level2_list + level3_list),
+        "候选等级": ["二级相随号"] * len(level2_list) + ["三级跟随号"] * len(level3_list),
+        "号码": level2_list + level3_list
     })
     df_save.to_csv(filename, index=False, encoding="utf-8-sig")
     return filename
 
 def save_select_comb(period, play_type, comb_list):
-    """保存选号组合为 xxx期选号组合.csv"""
+    """保存选号组合为「xxx期选号组合.csv」"""
     filename = os.path.join(SAVE_DIR, f"{period}期选号组合.csv")
     rows = []
     for idx, nums in enumerate(comb_list):
-        rows.append([period, play_type, f"方案{idx+1}"," ".join([f"{n:02d}" for n in nums])])
-    df_save = pd.DataFrame(rows, columns=["期号","玩法类型","方案编号","选号号码"])
+        rows.append([
+            period, play_type, f"方案{idx+1}",
+            " ".join([f"{n:02d}" for n in nums]),
+            len(nums)
+        ])
+    df_save = pd.DataFrame(rows, columns=["期号", "玩法类型", "方案编号", "选号号码", "选号个数"])
     df_save.to_csv(filename, index=False, encoding="utf-8-sig")
     return filename
 
 def load_predict_num(period):
-    """读取对应期号预测号数据"""
+    """读取对应期号预测号"""
     filename = os.path.join(SAVE_DIR, f"{period}期预测号.csv")
     if os.path.exists(filename):
         return pd.read_csv(filename, encoding="utf-8-sig")
     return None
 
+def load_all_select_comb():
+    """读取所有往期选号组合（新增回顾模块核心函数）"""
+    all_files = [f for f in os.listdir(SAVE_DIR) if f.endswith("期选号组合.csv")]
+    all_data = []
+    for file in all_files:
+        try:
+            period = file.split("期选号组合.csv")[0]
+            df = pd.read_csv(os.path.join(SAVE_DIR, file), encoding="utf-8-sig")
+            all_data.append(df)
+        except:
+            continue
+    if all_data:
+        return pd.concat(all_data, ignore_index=True)
+    return pd.DataFrame(columns=["期号", "玩法类型", "方案编号", "选号号码", "选号个数"])
+
 def calc_match_rate(predict_nums, real_nums):
-    """计算预测号VS开奖号码正确率、匹配个数"""
-    predict_set = set(predict_nums)
-    real_set = set(real_nums)
-    match = predict_set & real_set
-    match_cnt = len(match)
-    rate = round(match_cnt/len(predict_set)*100,2) if predict_set else 0
-    return {"匹配号码":sorted(list(match)),"匹配个数":match_cnt,"正确率%":rate}
+    """计算预测/选号与开奖号码的匹配率"""
+    predict_set = set([int(x) for x in predict_nums])
+    real_set = set([int(x) for x in real_nums])
+    match_nums = sorted(list(predict_set & real_set))
+    match_cnt = len(match_nums)
+    total_cnt = len(predict_set)
+    rate = round(match_cnt / total_cnt * 100, 2) if total_cnt > 0 else 0
+    return {"匹配号码": match_nums, "匹配个数": match_cnt, "正确率%": rate}
 
 # ====================== 底层模块1：数据读写/校验 ======================
 def load_data():
+    """加载历史数据，异常兜底，自动初始化原始数据"""
     try:
         if not os.path.exists(DATA_FILE):
             with open(DATA_FILE, 'w', newline='', encoding='utf-8') as f:
                 writer = csv.writer(f)
-                writer.writerow(['period'] + [f'n{i}' for i in range(1,21)])
+                writer.writerow(['period'] + [f'n{i}' for i in range(1, 21)])
                 writer.writerows(INIT_DATA)
         df = pd.read_csv(DATA_FILE, dtype={'period': str})
-        required_cols = ['period'] + [f'n{i}' for i in range(1,21)]
-        if not all(col in df.columns for col in required_cols):raise ValueError("表头损坏重置")
+        required_cols = ['period'] + [f'n{i}' for i in range(1, 21)]
+        if not all(col in df.columns for col in required_cols):
+            raise ValueError("CSV表头损坏，自动重置")
+        # 去重+按期号降序排序
         df = df.drop_duplicates(subset=['period'], keep='last')
         df['period_num'] = df['period'].astype(int)
         df = df.sort_values('period_num', ascending=False).reset_index(drop=True)
         df = df.drop(columns=['period_num'])
         return df
     except Exception as e:
+        # 异常兜底，重置为原始数据
         with open(DATA_FILE, 'w', newline='', encoding='utf-8') as f:
-            w=csv.writer(f)
-            w.writerow(['period']+[f'n{i}'for i in range(1,21)])
-            w.writerows(INIT_DATA)
-        return pd.read_csv(DATA_FILE,dtype={'period':str})
+            writer = csv.writer(f)
+            writer.writerow(['period'] + [f'n{i}' for i in range(1, 21)])
+            writer.writerows(INIT_DATA)
+        df = pd.read_csv(DATA_FILE, dtype={'period': str})
+        df['period_num'] = df['period'].astype(int)
+        df = df.sort_values('period_num', ascending=False).reset_index(drop=True)
+        df = df.drop(columns=['period_num'])
+        return df
 
 def save_new_data(period, numbers):
+    """保存新期开奖数据"""
     try:
         with open(DATA_FILE, 'a', newline='', encoding='utf-8') as f:
-            csv.writer(f).writerow([period]+sorted(numbers))
+            csv.writer(f).writerow([period] + sorted(numbers))
         return True
-    except:return False
+    except Exception as e:
+        st.error(f"保存失败：{str(e)}")
+        return False
 
-def delete_period_data(period,df):
-    new_df=df[df['period']!=period].reset_index(drop=True)
-    new_df.to_csv(DATA_FILE,index=False,encoding='utf-8')
+def delete_period_data(period, df):
+    """删除指定期号数据"""
+    new_df = df[df['period'] != period].reset_index(drop=True)
+    new_df.to_csv(DATA_FILE, index=False, encoding='utf-8')
     return new_df
 
-def validate_period_unique(period,df):
-    if not period or not period.isdigit():return False,"期号纯数字不能为空"
-    if period in df['period'].values:return False,"期号重复"
-    return True,"通过"
+def validate_period_unique(period, df):
+    """校验期号唯一性"""
+    if not period or not period.isdigit():
+        return False, "期号必须为非空纯数字"
+    if period in df['period'].values:
+        return False, "期号已存在，禁止重复录入"
+    return True, "校验通过"
 
-def validate_numbers(nums):
+def validate_numbers(numbers):
+    """校验开奖号码合法性"""
     try:
-        ns=[int(x.strip())for x in nums if x.strip()]
-        if len(ns)!=20:return False,f"需20个号码，当前{len(ns)}个"
-        if len(set(ns))!=20:return False,"号码重复"
-        if min(ns)<1 or max(ns)>80:return False,"范围1-80"
-        return True,sorted(ns)
-    except:return False,"格式错误仅支持数字"
+        ns = [int(x.strip()) for x in numbers if x.strip()]
+        if len(ns) != 20:
+            return False, f"必须输入20个号码，当前仅输入{len(ns)}个"
+        if len(set(ns)) != 20:
+            return False, "号码不能重复"
+        if min(ns) < 1 or max(ns) > 80:
+            return False, "号码必须在1-80区间内"
+        return True, sorted(ns)
+    except ValueError:
+        return False, "号码格式错误，仅支持纯数字"
 
-# ====================== 底层模块2：数据分析引擎 ======================
-def analyze_full_data(df,window=None):
-    data=df.head(window).copy()if window else df.copy()
-    num_list=[row.iloc[1:21].tolist()for _,row in data.iterrows()]
-    flat_nums=[n for p in num_list for n in p]
-    total=len(num_list)
-    avg=len(flat_nums)/80
+# ====================== 底层模块2：数据分析引擎（全语法修复，变量统一）======================
+def analyze_full_data(df, window=None):
+    """全量数据分析核心引擎，返回值key统一，无KeyError"""
+    data = df.head(window).copy() if window else df.copy()
+    num_list = [[int(x) for x in row.iloc[1:21].tolist()] for _, row in data.iterrows()]
+    flat_nums = [n for p in num_list for n in p]
+    total_periods = len(num_list)
+    avg_appear = len(flat_nums) / 80 if total_periods > 0 else 0
+
     return {
-        "hot_cold":calc_hot_cold(flat_nums),"miss_analysis":calc_miss_analysis(num_list,total),
-        "co_occur_matrix":calc_co_occur(num_list),"follow_matrix":calc_follow(num_list),
-        "road":calc_road(flat_nums),"zone":calc_zone(flat_nums),"con":calc_con(num_list),
-        "nums_list":num_list,"flat":flat_nums,"total":total,"avg":avg
+        "hot_cold": calc_hot_cold(flat_nums),
+        "miss_analysis": calc_miss_analysis(num_list, total_periods),
+        "co_occur_matrix": calc_co_occur(num_list),
+        "follow_matrix": calc_follow(num_list),
+        "road_distribution": calc_road(flat_nums),
+        "zone_distribution": calc_zone(flat_nums),
+        "consecutive_stats": calc_consecutive(num_list),
+        "nums_list": num_list,
+        "flat_nums": flat_nums,
+        "total_periods": total_periods,
+        "avg_appear": avg_appear
     }
-def calc_hot_cold(flat):
-    c=Counter(flat)
-    full={n:c.get(n,0)for n in range(1,81)}
-    return {"hot_top10":c.most_common(10),"cold_top10":c.most_common()[-10:][::-1],"full":full}
-def calc_miss_analysis(num_list,total):
-    la={};mc={};ma={};mi={};all_mi=defaultdict(list)
-    for idx,ns in enumerate(num_list):
-        for n in ns:
-            if n in la:all_mi[n].append(idx-la[n])
-            la[n]=idx
-    for n in range(1,81):
-        mi[n]=total-1-la.get(n,0)
-        arr=all_mi[n]
-        mc[n]=np.mean(arr)if arr else 0;ma[n]=max(arr)if arr else 0
-    miss_df=pd.DataFrame({"号码":range(1,81),"当前遗漏":[mi[n]for n in range(1,81)],
-    "平均遗漏":[f"{mc[n]:.1f}"for n in range(1,81)],"最大遗漏":[ma[n]for n in range(1,81)],
-    "出现次数":[len(all_mi[n])+1if n in la else 0 for n in range(1,81)],
-    "回补率%":[f"{min(100,round(mi[n]/mc[n]*100,1))if mc[n]>0 else 0.0}"for n in range(1,81)]}).sort_values("当前遗漏",asc=False)
-    return {"miss_df":miss_df,"mi":mi,"mc":mc,"ma":ma}
-def calc_co_occur(num_list):
-    cd=defaultdict(int)
-    for ns in num_list:
-        s=sorted(ns)
-        for i in range(20):
-            for j in range(i+1,20):cd[(s[i],s[j])]+=1
-    return {"dict":cd,"top10":sorted(cd.items(),key=lambda x:x[1],reverse=True)[:10]}
-def calc_follow(num_list):
-    fd=defaultdict(int)
-    for i in range(1,len(num_list)):
-        pre,curr=num_list[i-1],num_list[i]
-        for a in pre:
-            for b in curr:fd[(a,b)]+=1
-    return {"dict":fd,"top10":sorted(fd.items(),key=lambda x:x[1],reverse=True)[:10]}
-def calc_road(flat):
-    r0=sum(1for n in flat if n%3==0);r1=sum(1for n in flat if n%3==1);r2=sum(1for n in flat if n%3==2)
-    t=len(flat)or1
-    return {"r0":r0,"r1":r1,"r2":r2,"r0r":f"{r0/t*100:.1f}%","r1r":f"{r1/t*100:.1f}%","r2r":f"{r2/t*100:.1f}%"}
-def calc_zone(flat):
-    z1=sum(1for n in flat if1<=n<=20);z2=sum(1for n in flat if21<=n<=40)
-    z3=sum(1for n in flat if41<=n<=60);z4=sum(1for n in flat if61<=n<=80)
-    t=len(flat)or1
-    return {"z1":z1,"z2":z2,"z3":z3,"z4":z4,"z1r":f"{z1/t*100:.1f}%","z2r":f"{z2/t*100:.1f}%","z3r":f"{z3/t*100:.1f}%","z4r":f"{z4/t*100:.1f}%"}
-def calc_con(num_list):
-    clist=[]
-    for ns in num_list:
-        s,cnt=sorted(ns),0
-        for i in range(1,20):
-            if s[i]==s[i-1]+1:cnt+=1
-        clist.append(cnt)
-    return {"avg":np.mean(clist)if clist else0,"max":max(clist)if clist else0,"min":min(clist)if clist else0}
 
-# ====================== 核心同源函数（跨期/复盘共用，保证数据一致+修复np.int64） ======================
+def calc_hot_cold(flat_nums):
+    """冷热号统计，全覆盖1-80号"""
+    counter = Counter(flat_nums)
+    full_counter = {n: counter.get(n, 0) for n in range(1, 81)}
+    hot_top10 = counter.most_common(10)
+    cold_top10 = counter.most_common()[-10:][::-1]
+    return {
+        "hot_top10": hot_top10,
+        "cold_top10": cold_top10,
+        "full_counter": full_counter
+    }
+
+def calc_miss_analysis(num_list, total_periods):
+    """遗漏值分析，边界处理完善"""
+    last_appear = {}
+    miss_current = {}
+    miss_avg = {}
+    miss_max = {}
+    all_miss = defaultdict(list)
+    
+    for idx, nums in enumerate(num_list):
+        for n in nums:
+            if n in last_appear:
+                all_miss[n].append(idx - last_appear[n])
+            last_appear[n] = idx
+    
+    for n in range(1, 81):
+        miss_current[n] = total_periods - 1 - last_appear.get(n, 0)
+        arr = all_miss.get(n, [])
+        miss_avg[n] = np.mean(arr) if len(arr) > 0 else 0
+        miss_max[n] = max(arr) if len(arr) > 0 else 0
+
+    miss_df = pd.DataFrame({
+        "号码": range(1, 81),
+        "当前遗漏": [miss_current[n] for n in range(1, 81)],
+        "平均遗漏": [f"{miss_avg[n]:.1f}" for n in range(1, 81)],
+        "最大遗漏": [miss_max[n] for n in range(1, 81)],
+        "出现次数": [len(all_miss[n]) + 1 if n in last_appear else 0 for n in range(1, 81)],
+        "回补概率%": [f"{min(100, round((miss_current[n]/miss_avg[n]*100), 1)) if miss_avg[n] > 0 else 0.0}" for n in range(1, 81)]
+    }).sort_values("当前遗漏", ascending=False)
+    
+    return {
+        "miss_df": miss_df,
+        "miss_current": miss_current,
+        "miss_avg": miss_avg,
+        "miss_max": miss_max
+    }
+
+def calc_co_occur(num_list):
+    """相随号同现矩阵"""
+    co_occur = defaultdict(int)
+    for ns in num_list:
+        sorted_ns = sorted(ns)
+        for i in range(20):
+            for j in range(i+1, 20):
+                co_occur[(sorted_ns[i], sorted_ns[j])] += 1
+    co_sorted = sorted(co_occur.items(), key=lambda x: x[1], reverse=True)
+    return {
+        "co_occur_dict": co_occur,
+        "co_top10": co_sorted[:10],
+        "co_sorted": co_sorted
+    }
+
+def calc_follow(num_list):
+    """跨期跟随号矩阵"""
+    follow = defaultdict(int)
+    for i in range(1, len(num_list)):
+        pre_nums = num_list[i-1]
+        curr_nums = num_list[i]
+        for a in pre_nums:
+            for b in curr_nums:
+                follow[(a, b)] += 1
+    follow_sorted = sorted(follow.items(), key=lambda x: x[1], reverse=True)
+    return {
+        "follow_dict": follow,
+        "follow_top10": follow_sorted[:10],
+        "follow_sorted": follow_sorted
+    }
+
+def calc_road(flat_nums):
+    """012路分布统计（修复语法错误，全规范写法）"""
+    road0 = sum(1 for n in flat_nums if n % 3 == 0)
+    road1 = sum(1 for n in flat_nums if n % 3 == 1)
+    road2 = sum(1 for n in flat_nums if n % 3 == 2)
+    total = len(flat_nums)
+    if total == 0:
+        total = 1
+    return {
+        "road0": road0, "road1": road1, "road2": road2,
+        "road0_rate": f"{road0/total*100:.1f}%",
+        "road1_rate": f"{road1/total*100:.1f}%",
+        "road2_rate": f"{road2/total*100:.1f}%"
+    }
+
+def calc_zone(flat_nums):
+    """4区间分布统计（修复语法错误，全规范写法）"""
+    zone1 = sum(1 for n in flat_nums if 1 <= n <= 20)
+    zone2 = sum(1 for n in flat_nums if 21 <= n <= 40)
+    zone3 = sum(1 for n in flat_nums if 41 <= n <= 60)
+    zone4 = sum(1 for n in flat_nums if 61 <= n <= 80)
+    total = len(flat_nums)
+    if total == 0:
+        total = 1
+    return {
+        "zone1": zone1, "zone2": zone2, "zone3": zone3, "zone4": zone4,
+        "zone1_rate": f"{zone1/total*100:.1f}%",
+        "zone2_rate": f"{zone2/total*100:.1f}%",
+        "zone3_rate": f"{zone3/total*100:.1f}%",
+        "zone4_rate": f"{zone4/total*100:.1f}%"
+    }
+
+def calc_consecutive(num_list):
+    """连号统计"""
+    consecutive_list = []
+    for ns in num_list:
+        sorted_ns = sorted(ns)
+        cnt = 0
+        for i in range(1, 20):
+            if sorted_ns[i] == sorted_ns[i-1] + 1:
+                cnt += 1
+        consecutive_list.append(cnt)
+    return {
+        "avg_consecutive": np.mean(consecutive_list) if len(consecutive_list) > 0 else 0,
+        "max_consecutive": max(consecutive_list) if len(consecutive_list) > 0 else 0,
+        "min_consecutive": min(consecutive_list) if len(consecutive_list) > 0 else 0,
+        "full_list": consecutive_list
+    }
+
+# ====================== 核心同源分析函数（跨期/复盘共用，数据100%对齐）======================
 def calc_number_structure(numbers, prev_numbers=None):
-    """全局唯一分析函数，跨期、复盘调用同一个，数据100%对齐；内置清洗np.int64"""
+    """全局唯一结构分析函数，根除np.int64，跨期/复盘共用"""
+    # 强制转Python原生int，彻底根除np.int64乱码
     numbers = [int(n) for n in numbers]
     if prev_numbers is not None:
         prev_numbers = [int(n) for n in prev_numbers]
     numbers = sorted(numbers)
-    odd=sum(n%2for n in numbers);even=20-odd
-    small=sum(1for n in numbers if n<=40);large=20-small
-    r0=sum(1for n in numbers if n%3==0);r1=sum(1for n in numbers if n%3==1);r2=sum(1for n in numbers if n%3==2)
-    prime=sum(1for n in numbers if n in PRIME_NUMBERS);composite=20-prime
-    sumv=sum(numbers);span=numbers[-1]-numbers[0]
-    con_list,i=[],0
-    while i<19:
-        if numbers[i+1]==numbers[i]+1:
-            st=numbers[i]
-            while i<19 and numbers[i+1]==numbers[i]+1:i+=1
-            con_list.append(f"{st}-{numbers[i]}")
-        i+=1
-    repeat=[n for n in numbers if n in prev_numbers]if prev_numbers else[]
-    oblique=[n for n in numbers if(n-1 in prev_numbers)or(n+1 in prev_numbers)]if prev_numbers else[]
-    tail_cnt=Counter([n%10for n in numbers])
-    tail_dict={t:[int(x)for x in numbers if x%10==t]for t,c in tail_cnt.items()if c>=2}
-    z1=sum(1for n in numbers if1<=n<=20);z2=sum(1for n in numbers if21<=n<=40)
-    z3=sum(1for n in numbers if41<=n<=60);z4=sum(1for n in numbers if61<=n<=80)
-    return {
-        "nums":numbers,"odd":odd,"even":even,"oe":f"{odd}:{even}",
-        "small":small,"large":large,"sl":f"{small}:{large}",
-        "r0":r0,"r1":r1,"r2":r2,"road":f"{r0}:{r1}:{r2}",
-        "prime":prime,"composite":composite,"pc":f"{prime}:{composite}",
-        "sum":sumv,"span":span,"con":con_list,"con_cnt":len(con_list),
-        "repeat":repeat,"repeat_cnt":len(repeat),"oblique":oblique,"oblique_cnt":len(oblique),
-        "tail":tail_dict,"tail_cnt":len(tail_dict),"z1":z1,"z2":z2,"z3":z3,"z4":z4
-    }
-def generate_deep_review(nums,prev_nums=None,period="未知"):
-    s=calc_number_structure(nums,prev_nums)
-    return {"period":period,**s}
 
-# ====================== 预测号生成+格式化 ======================
-def generate_leveled_pool(curr_nums,co_dict,follow_dict,num_status):
-    curr=[int(x)for x in curr_nums];l1=set(curr)
-    l2_cnt,co_map=Counter(),defaultdict(list)
-    for n in curr:
-        tmp=sorted([(a,b,c)for(a,b),c in co_dict.items()if a==n and b not in l1 or b==n and a not in l1],key=lambda x:x[2],reverse=True)[:3]
-        co_map[n]=[(x[1],x[2])if x[0]==n else(x[0],x[2])for x in tmp]
-        for b,_ in co_map[n]:l2_cnt[b]+=1
-    l2_set=set(l2_cnt.keys())-l1;l2_cnt=Counter({k:v for k,v in l2_cnt.items()if k in l2_set})
-    l3_cnt,follow_map=Counter(),defaultdict(list)
-    for n in l2_set:
-        tmp=sorted([(a,b,c)for(a,b),c in follow_dict.items()if a==n and b not in l1 and b not in l2_set],key=lambda x:x[2],reverse=True)[:2]
-        follow_map[n]=[(x[1],x[2])for x in tmp]
-        for b,_ in follow_map[n]:l3_cnt[b]+=1
-    l3_set=set(l3_cnt.keys())-l1-l2_set
-    def group(cnt):
-        g=defaultdict(list)
-        for k,v in cnt.items():g[v].append(k)
-        return sorted(g.items(),key=lambda x:x[0],reverse=True)
-    return {"l1":curr,"l2":l2_set,"l3":l3_set,"l2_group":group(l2_cnt),"l3_group":group(l3_cnt),"co":co_map,"follow":follow_map}
-def get_num_status(full):
-    c=full['hot_cold']['full'];avg=full['avg']
-    hot=max(avg+HOT_COLD_FACTOR,5);cold=min(avg-HOT_COLD_FACTOR,avg*0.5)
-    d={}
-    for n in range(1,81):
-        cnt=c[n];r=n%3;st="hot"if cnt>=hot else"cold"if cnt<=cold else"warm"
-        d[n]={"st":st,"road":f"{r}路"if r!=0 else"0路","cnt":cnt}
-    return d
-def fmt_num(n,d):
-    s=d[n]
-    if s['st']=="hot":return f'<span style="color:red;font-weight:bold;margin:0 2px">{n:02d}</span><small style="color:#666">({s["road"]},{s["cnt"]}次)</small>'
-    elif s['st']=="cold":return f'<span style="color:blue;font-weight:bold;margin:0 2px">{n:02d}</span><small style="color:#666">({s["road"]},{s["cnt"]}次)</small>'
-    else:return f'<span style="color:black;margin:0 2px">{n:02d}</span><small style="color:#666">({s["road"]},{s["cnt"]}次)</small>'
-def gen_play_plan(full,play,predict_nums,cnt=3):
-    need=PLAY_RULE[play];hot=[x[0]for x in full['hot_cold']['hot_top10']];cold=[x[0]for x in full['hot_cold']['cold_top10']]
-    plans=[]
-    for i in range(cnt):
-        if i==0:base=predict_nums[:int(need*0.6)]+hot[:3]+cold[:2]
-        elif i==1:base=predict_nums[:int(need*0.7)]+hot[:4]
-        else:base=predict_nums[:int(need*0.5)]+cold[:5]
-        res=sorted(list(set(base)))[:need]
+    # 全维度指标计算
+    odd = sum(n % 2 for n in numbers)
+    even = 20 - odd
+    small = sum(1 for n in numbers if n <= 40)
+    large = 20 - small
+    road0 = sum(1 for n in numbers if n % 3 == 0)
+    road1 = sum(1 for n in numbers if n % 3 == 1)
+    road2 = sum(1 for n in numbers if n % 3 == 2)
+    prime = sum(1 for n in numbers if n in PRIME_NUMBERS)
+    composite = 20 - prime
+    sum_val = sum(numbers)
+    span = numbers[-1] - numbers[0] if len(numbers) > 0 else 0
+
+    # 连号计算
+    con_list = []
+    i = 0
+    while i < 19:
+        if numbers[i+1] == numbers[i] + 1:
+            start = numbers[i]
+            while i < 19 and numbers[i+1] == numbers[i] + 1:
+                i += 1
+            con_list.append(f"{start}-{numbers[i]}")
+        i += 1
+
+    # 重号/斜连号/同尾号
+    repeat = [n for n in numbers if n in prev_numbers] if prev_numbers else []
+    oblique = [n for n in numbers if (n-1 in prev_numbers) or (n+1 in prev_numbers)] if prev_numbers else []
+    tail_counter = Counter([n % 10 for n in numbers])
+    tail_dict = {t: [int(x) for x in numbers if x % 10 == t] for t, cnt in tail_counter.items() if cnt >= 2}
+
+    # 区间分布
+    z1 = sum(1 for n in numbers if 1 <= n <= 20)
+    z2 = sum(1 for n in numbers if 21 <= n <= 40)
+    z3 = sum(1 for n in numbers if 41 <= n <= 60)
+    z4 = sum(1 for n in numbers if 61 <= n <= 80)
+
+    return {
+        "nums": numbers,
+        "odd": odd, "even": even, "odd_even_ratio": f"{odd}:{even}",
+        "small": small, "large": large, "size_ratio": f"{small}:{large}",
+        "road0": road0, "road1": road1, "road2": road2, "road_ratio": f"{road0}:{road1}:{road2}",
+        "prime": prime, "composite": composite, "prime_composite_ratio": f"{prime}:{composite}",
+        "sum": sum_val, "span": span,
+        "consecutive": con_list, "consecutive_count": len(con_list),
+        "repeat": repeat, "repeat_count": len(repeat),
+        "oblique": oblique, "oblique_count": len(oblique),
+        "same_tail": tail_dict, "same_tail_count": len(tail_dict),
+        "z1": z1, "z2": z2, "z3": z3, "z4": z4, "zone_ratio": f"{z1}:{z2}:{z3}:{z4}"
+    }
+
+def generate_deep_review(nums, prev_nums=None, period="未知期号"):
+    """生成深度复盘报告，同源调用"""
+    structure = calc_number_structure(nums, prev_nums)
+    return {"period": period, **structure}
+
+# ====================== 预测池/选号方案/格式化工具函数 ======================
+def generate_leveled_pool(curr_nums, co_dict, follow_dict, num_status):
+    """生成分级预测号码池，严格去重"""
+    curr_nums = [int(x) for x in curr_nums]
+    level1_set = set(curr_nums)
+
+    # 二级相随号
+    level2_counter = Counter()
+    co_map = defaultdict(list)
+    for n in curr_nums:
+        temp = []
+        for (a, b), cnt in co_dict.items():
+            if a == n and b not in level1_set:
+                temp.append((b, cnt))
+            elif b == n and a not in level1_set:
+                temp.append((a, cnt))
+        temp.sort(key=lambda x: x[1], reverse=True)
+        top3 = temp[:3]
+        co_map[n] = top3
+        for b, _ in top3:
+            level2_counter[b] += 1
+
+    level2_set = set(level2_counter.keys()) - level1_set
+    level2_counter = Counter({k: v for k, v in level2_counter.items() if k in level2_set})
+
+    # 三级跟随号
+    level3_counter = Counter()
+    follow_map = defaultdict(list)
+    for n in level2_set:
+        temp = []
+        for (a, b), cnt in follow_dict.items():
+            if a == n and b not in level1_set and b not in level2_set:
+                temp.append((b, cnt))
+        temp.sort(key=lambda x: x[1], reverse=True)
+        top2 = temp[:2]
+        follow_map[n] = top2
+        for b, _ in top2:
+            level3_counter[b] += 1
+
+    level3_set = set(level3_counter.keys()) - level1_set - level2_set
+
+    # 按出现次数分组
+    def group_by_count(counter):
+        groups = defaultdict(list)
+        for k, v in counter.items():
+            groups[v].append(k)
+        return sorted(groups.items(), key=lambda x: x[0], reverse=True)
+
+    return {
+        "level1": curr_nums,
+        "level1_set": level1_set,
+        "level2_set": level2_set,
+        "level3_set": level3_set,
+        "level2_groups": group_by_count(level2_counter),
+        "level3_groups": group_by_count(level3_counter),
+        "co_map": co_map,
+        "follow_map": follow_map
+    }
+
+def get_num_status(full_analysis):
+    """生成号码状态字典，用于格式化渲染"""
+    full_counter = full_analysis["hot_cold"]["full_counter"]
+    avg_appear = full_analysis["avg_appear"]
+    hot_threshold = max(avg_appear + HOT_COLD_FACTOR, 5)
+    cold_threshold = min(avg_appear - HOT_COLD_FACTOR, avg_appear * 0.5)
+
+    num_status = {}
+    for n in range(1, 81):
+        cnt = full_counter.get(n, 0)
+        road = n % 3
+        road_name = f"{road}路" if road != 0 else "0路"
+        if cnt >= hot_threshold:
+            status = "hot"
+        elif cnt <= cold_threshold:
+            status = "cold"
+        else:
+            status = "warm"
+        num_status[n] = {
+            "status": status,
+            "road": road_name,
+            "count": cnt
+        }
+    return num_status
+
+def fmt_num(n, num_status):
+    """格式化号码渲染，带冷热颜色标记"""
+    s = num_status[n]
+    if s["status"] == "hot":
+        return f'<span style="color:red; font-weight:bold; margin:0 2px;">{n:02d}</span><small style="color:#666;">({s["road"]},{s["count"]}次)</small>'
+    elif s["status"] == "cold":
+        return f'<span style="color:blue; font-weight:bold; margin:0 2px;">{n:02d}</span><small style="color:#666;">({s["road"]},{s["count"]}次)</small>'
+    else:
+        return f'<span style="color:black; margin:0 2px;">{n:02d}</span><small style="color:#666;">({s["road"]},{s["count"]}次)</small>'
+
+def gen_play_plan(full_analysis, play_type, predict_nums, plan_count=3):
+    """从预测号内生成选号方案"""
+    need_num = PLAY_RULE[play_type]
+    hot_nums = [x[0] for x in full_analysis["hot_cold"]["hot_top10"]]
+    cold_nums = [x[0] for x in full_analysis["hot_cold"]["cold_top10"]]
+    miss_df = full_analysis["miss_analysis"]["miss_df"]
+    high_back_nums = miss_df[miss_df["回补概率%"].astype(float) >= 80]["号码"].tolist()
+
+    plans = []
+    for i in range(plan_count):
+        if i == 0:
+            base = predict_nums[:int(need_num * 0.6)] + hot_nums[:3] + cold_nums[:2] + high_back_nums[:2]
+        elif i == 1:
+            base = predict_nums[:int(need_num * 0.7)] + hot_nums[:4] + high_back_nums[:1]
+        else:
+            base = predict_nums[:int(need_num * 0.5)] + cold_nums[:5] + high_back_nums[:2]
+        res = sorted(list(set(base)))[:need_num]
         plans.append(res)
     return plans
 
 # ====================== 全局初始化 ======================
-df=load_data_cached();total=len(df)
+df = load_data_cached()
+total_periods = len(df)
 
 # ====================== 侧边栏 ======================
 with st.sidebar:
-    st.title("🎰快乐8数据分析系统")
-    st.divider();st.metric("总收录期数",f"{total}期");st.divider()
-    if st.button("🔄清除缓存刷新",use_container_width=True):load_data_cached.clear();get_full_analysis_cached.clear();st.rerun()
-    st.divider();st.error("仅历史数据统计娱乐，不构成购彩建议，理性购彩！")
+    st.title("🎰 快乐8数据分析系统")
+    st.divider()
+    st.metric("总收录期数", f"{total_periods}期")
+    st.divider()
+    if st.button("🔄 清除缓存刷新数据", use_container_width=True, type="primary"):
+        load_data_cached.clear()
+        get_full_analysis_cached.clear()
+        st.rerun()
+    st.divider()
+    st.error("""
+    ⚠️ 风险提示
+    彩票开奖为完全随机事件，
+    本工具仅用于历史数据统计娱乐，
+    不构成任何购彩建议，
+    请理性购彩，量力而行！
+    """)
 
-# ====================== 标签页创建 ======================
-tab1,tab2,tab3,tab4,tab5,tab6,tab7=st.tabs(["🏠首页","📋号码库","📊多周期","🔮选号参考","📝单期复盘","🔄跨期对比","⚙️设置"])
+# ====================== 主页面标签页 ======================
+tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+    "🏠 首页说明",
+    "📋 号码库管理",
+    "📊 多周期分析",
+    "🔮 多玩法选号参考",
+    "📝 单期深度复盘",
+    "🔄 跨期对比与预测池",
+    "⚙️ 数据管理与重置"
+])
 
-# ========== Tab1 首页 ==========
+# ========== Tab1 首页说明 ==========
 with tab1:
-    st.title("🎰福彩快乐8专业数据分析系统")
-    st.subheader(f"当前收录：{total}期 | 全功能终极修改版")
-    st.error("开奖完全随机，仅历史统计娱乐，不构成购彩建议！")
-    if total>0:
-        l=df.iloc[0];st.subheader(f"最新{l['period']}期开奖：{' '.join([f'{x:02d}'for x in l.iloc[1:21]])}")
-
-# ========== Tab2 号码库 ==========
-with tab2:
-    st.header("📋开奖号码库管理")
-    with st.form("add"):
-        c1,c2=st.columns(2)
-        with c1:p1=st.text_input("期号")
-        with c2:p2=st.text_input("20个号码空格分隔")
-        sub=st.form_submit_button("保存录入",use_container_width=True,type="primary")
-        if sub:
-            v1,m1=validate_period_unique(p1,df)
-            if not v1:st.error(m1)
-            else:
-                v2,m2=validate_numbers(p2.split())
-                if not v2:st.error(m2)
-                else:save_new_data(p1,m2);st.success("录入成功");load_data_cached.clear();get_full_analysis_cached.clear();st.rerun()
+    st.title("🎰 福彩快乐8 专业数据分析系统")
+    st.subheader(f"当前已收录数据：{total_periods}期 | 全功能修复终版")
     st.divider()
-    with st.form("del"):
-        dp=st.selectbox("选择删除期号",df['period'].tolist())
-        if st.form_submit_button("确认删除",type="secondary",use_container_width=True):
-            df=delete_period_data(dp,df);st.success("删除成功");load_data_cached.clear();get_full_analysis_cached.clear();st.rerun()
-    st.divider();st.dataframe(df,use_container_width=True,height=400)
-
-# ========== Tab3 多周期（已修改为12/24/60/120/150期+） ==========
-with tab3:
-    st.header("📊多周期数据分析")
-    # 核心修改：替换为新周期配置
-    window_options={
-        "近12期":12,"近24期":24,"近60期":60,"近120期":120,"150期以上全量":None
-    }
-    sel=st.selectbox("选择分析周期",list(window_options.keys()));w=window_options[sel]
-    if w and total<w:
-        st.warning(f"当前仅{total}期，未达到{w}期门槛，请补充数据！")
-    else:
-        fd=get_full_analysis_cached(df,w);st.info(f"分析维度：{sel}，共{fd['total']}期")
-        # 原有图表代码不变，兼容新周期
-        st.divider();c1,c2=st.columns(2)
-        with c1:st.subheader("热号TOP10");st.dataframe(pd.DataFrame(fd['hot_cold']['hot_top10'],columns=["号码","次数"]),use_container_width=True)
-        with c2:st.subheader("冷号TOP10");st.dataframe(pd.DataFrame(fd['hot_cold']['cold_top10'],columns=["号码","次数"]),use_container_width=True)
-        st.divider();st.subheader("遗漏值全表");st.dataframe(fd['miss_analysis']['miss_df'],use_container_width=True,height=400)
-
-# ========== Tab5 单期复盘（同源函数+np格式化修复完成） ==========
-with tab5:
-    st.header("📝单期深度复盘")
-    mode=st.radio("复盘方式",["历史期号","手动录入"],horizontal=True)
-    if mode=="历史期号":
-        plist=df['period'].tolist();sp=st.selectbox("选择复盘期号",plist)
-        if st.button("生成复盘报告",use_container_width=True,type="primary"):
-            crow=df[df['period']==sp].iloc[0];cn=crow.iloc[1:21].tolist()
-            cidx=df[df['period']==sp].index[0];pn=df.iloc[cidx+1].iloc[1:21].tolist()if cidx<len(df)-1 else None
-            rev=generate_deep_review(cn,pn,sp);fd=get_full_analysis_cached(df);nsd=get_num_status(fd)
-            # 美化格式化输出，彻底清除np.int64
-            con_show="、".join(rev['con'])if rev['con']else"无"
-            rep_show="、".join([f"{x:02d}"for x in rev['repeat']])if rev['repeat']else"无"
-            obl_show="、".join([f"{x:02d}"for x in rev['oblique']])if rev['oblique']else"无"
-            tail_list=[]
-            for tk,tns in rev['tail'].items():
-                tk_c=int(tk);tn_c="、".join([f"{x:02d}"for x in tns]);tail_list.append(f"尾{tk_c}：{tn_c}")
-            tail_show=" | ".join(tail_list)if tail_list else"无"
-            st.divider();st.subheader(f"{sp}期深度复盘")
-            st.markdown(f"开奖号码：{' '.join([fmt_num(x,nsd)for x in rev['nums']])}",unsafe_allow_html=True)
-            st.markdown(f"- 连号：{con_show}")
-            st.markdown(f"- 重号：{rep_show}（共{rev['repeat_cnt']}个）")
-            st.markdown(f"- 同尾号：{tail_show}（共{rev['tail_cnt']}组）")
-            st.markdown(f"- 斜连号：{obl_show}（共{rev['oblique_cnt']}个）")
-
-# ========== Tab6 跨期对比（同源对齐+二三级预测号自动存档） ==========
-with tab6:
-    st.header("🔄跨期对比与预测号码池（与单期复盘数据同源一致）")
-    plist=df['period'].tolist();scp=st.selectbox("选择本期分析期号",plist)
-    if st.button("生成对比+预测并自动存档",use_container_width=True,type="primary"):
-        cidx=df[df['period']==scp].index[0];crow=df.iloc[cidx];cn=crow.iloc[1:21].tolist()
-        pn=df.iloc[cidx+1].iloc[1:21].tolist()if cidx<len(df)-1 else None;pp=df.iloc[cidx+1]['period']if cidx<len(df)-1 else None
-        # 同源调用分析函数，和单期复盘完全一致
-        prev_rev=generate_deep_review(pn,None,pp)if pn else None
-        curr_rev=generate_deep_review(cn,pn,scp)
-        fd=get_full_analysis_cached(df);nsd=get_num_status(fd)
-        pool=generate_leveled_pool(cn,fd['co_occur_matrix']['dict'],fd['follow_matrix']['dict'],nsd)
-        # 核心功能：二/三级候选单独存档 xxx期预测号.csv
-        save_file=save_predict_num(scp,list(pool['l2']),list(pool['l3']))
-        st.success(f"✅已自动保存：{save_file}，二/三级预测号存档完成！")
-        # 双期同源数据对比展示
-        st.divider();cp1,cp2=st.columns(2)
-        with cp1:
-            st.subheader(f"上期{pp}复盘（同源数据）")
-            if prev_rev:st.markdown(f"奇偶比：{prev_rev['oe']} | 大小比：{prev_rev['sl']} | 012路：{prev_rev['road']}")
-        with cp2:
-            st.subheader(f"本期{scp}复盘（同源对齐）")
-            st.markdown(f"奇偶比：{curr_rev['oe']} | 大小比：{curr_rev['sl']} | 012路：{curr_rev['road']}")
-
-# ========== Tab4 多玩法选号（嵌套读取预测号+正确率比对+选号存档+迭代优化） ==========
-with tab4:
-    st.header("🔮多玩法选号参考（读取预测号+正确率验算+自动存档迭代）")
-    st.info("支持读取xxx期预测号生成方案、比对开奖正确率、选号组合自动存档、历史数据迭代调参")
-    # 读取预测号联动
-    sel_p=st.selectbox("选择读取对应期预测号",df['period'].tolist())
-    pred_df=load_predict_num(sel_p)
-    real_nums=df[df['period']==sel_p].iloc[0].iloc[1:21].tolist()if sel_p in df['period'].values else []
-    if pred_df is not None:
-        all_pred=pred_df['号码'].tolist()
-        # 新增1：预测号VS开奖正确率实时验算
-        mr=calc_match_rate(all_pred,real_nums)
-        st.metric("预测号匹配正确率",f"{mr['正确率%']}%",f"匹配{mr['匹配个数']}个")
-        st.write(f"精准匹配号码：{'、'.join([f'{x:02d}'for x in mr['匹配号码']])}")
-        # 玩法生成+从预测号挑选
-        play_sel=st.selectbox("选择玩法",list(PLAY_RULE.keys()));g_cnt=st.slider("生成方案数",1,5,3)
-        plans=gen_play_plan(get_full_analysis_cached(df),play_sel,all_pred,g_cnt)
-        # 选号组合自动存档 xxx期选号组合.csv
-        save_select_file=save_select_comb(sel_p,play_sel,plans)
-        st.success(f"✅选号组合已存档：{save_select_file}")
-        # 新增2：选号VS开奖比对+下一期迭代优化建议
-        st.divider();st.subheader("📈选号组合VS开奖比对+迭代优化方案")
-        for idx,pl in enumerate(plans):
-            m=calc_match_rate(pl,real_nums)
-            st.write(f"方案{idx+1}匹配数：{m['匹配个数']}个，正确率{m['正确率%']}%")
-        st.info("💡迭代优化建议：优先保留高匹配二级相随号、剔除连续错杀三级号，下期侧重冷热1:1配比+高回补遗漏号组合")
-
-# ========== Tab7 设置页（修复括号闭合+完整结尾） ==========
-with tab7:
-    st.header("⚙️数据管理与重置")
-    if os.path.exists(DATA_FILE):
-        with open(DATA_FILE,"rb")as f:cd=f.read()
-        st.download_button("下载原始CSV备份",cd,f"kl8_backup_{df.iloc[0]['period']}.csv",use_container_width=True)
+    st.error("""
+    ⚠️ 【重要法律与风险提醒】
+    本软件仅用于历史开奖数据的统计与展示，**彩票开奖号码为完全随机事件**，
+    任何历史走势、分析指标都无法预测未来结果，软件内的"选号参考"仅为娱乐性思路参考，
+    不构成任何购彩建议，请理性购彩，量力而行！
+    """)
+    st.info("""
+    软件核心功能：
+    1. 永久更新号码库：手动录入/删除/三重数据校验，期号唯一防重复
+    2. 多周期深度分析：近12/24/60/120期/150期以上全量数据多维度指标拆解
+    3. 全维度指标覆盖：冷热号、遗漏值、相随号/跟随号、012路、连号、区间分布
+    4. 多玩法选号参考：支持全玩法，从预测号内生成方案，自动存档，往期回顾
+    5. 单期深度复盘：历史期号一键复盘/手动录入实时分析，与跨期数据同源对齐
+    6. 跨期对比与预测池：双期联动复盘，自动生成分级预测号，单独存档
+    7. 数据管理与重置：支持CSV备份、一键重置、存档文件管理
+    """)
     st.divider()
-    if st.form("reset_f"):
-        ck=st.checkbox("确认重置为原始88期数据，不可恢复")
-        if st.form_submit_button("执行重置",type="secondary")and ck:
-            with open(DATA_FILE,'w',newline='',encoding='utf-8')as f:
-                w=csv.writer(f)
-                w.writerow(['period']+[f'n{i}'for i in range(1,21)])
-                w.writerows(INIT_DATA)
-            load_data_cached.clear();get_full_analysis_cached.clear()
-            st.success("重置完成");st.rerun()
-st.divider()
-st.markdown("<div style='text-align:center;color:#666'>仅历史统计娱乐，理性购彩，遵守法规</div>",unsafe_allow_html=True) 
-    # ========== Tab2 号码库管理 ==========
+    if total_periods > 0:
+        latest_row = df.iloc[0]
+        st.subheader(f"📌 最新一期({latest_row['period']}期)开奖号码")
+        st.markdown(f"**{' '.join([f'{n:02d}' for n in latest_row.iloc[1:21].tolist()])}**")
+
+# ========== Tab2 号码库管理 ==========
 with tab2:
     st.header("📋 开奖号码库管理")
-    # 新增开奖数据表单
     st.subheader("➕ 录入新一期开奖号码")
     with st.form("add_data_form", border=True):
         col1, col2 = st.columns(2)
@@ -529,8 +656,6 @@ with tab2:
         with col2:
             new_nums = st.text_input("开奖号码（20个数字，空格分隔）", placeholder="例：08 09 13 14 ... 80")
         submit_add = st.form_submit_button("保存到号码库", use_container_width=True, type="primary")
-        
-        # 提交校验逻辑
         if submit_add:
             period_valid, period_msg = validate_period_unique(new_period, df)
             if not period_valid:
@@ -543,13 +668,10 @@ with tab2:
                     save_success = save_new_data(new_period, num_msg)
                     if save_success:
                         st.success(f"✅ 成功录入{new_period}期数据！页面即将刷新...")
-                        # 清除缓存强制刷新
                         load_data_cached.clear()
                         get_full_analysis_cached.clear()
                         st.rerun()
-    
     st.divider()
-    # 删除错误数据功能
     st.subheader("🗑️ 删除错误期号数据")
     with st.form("delete_data_form", border=True):
         del_period = st.selectbox("选择要删除的期号", df["period"].tolist())
@@ -560,16 +682,13 @@ with tab2:
             load_data_cached.clear()
             get_full_analysis_cached.clear()
             st.rerun()
-    
     st.divider()
-    # 历史数据总览
     st.subheader("📜 历史开奖数据总览")
     st.dataframe(df, hide_index=True, use_container_width=True, height=400)
 
-# ========== Tab3 多周期数据分析（已按要求修改为12/24/60/120/150期+） ==========
+# ========== Tab3 多周期分析（已按要求修改为12/24/60/120/150期+）==========
 with tab3:
     st.header("📊 多周期数据分析")
-    # 自定义周期配置（严格按需求修改）
     window_options = {
         "近12期": 12,
         "近24期": 24,
@@ -579,17 +698,14 @@ with tab3:
     }
     selected_window = st.selectbox("选择分析周期", list(window_options.keys()))
     window_value = window_options[selected_window]
-    
-    # 数据量不足提示
-    if window_value and total < window_value:
-        st.warning(f"⚠️ 当前仅收录{total}期数据，未达到所选{window_value}期分析门槛，请补充开奖数据后再操作！")
+
+    if window_value and total_periods < window_value:
+        st.warning(f"⚠️ 当前仅收录{total_periods}期数据，未达到所选{window_value}期分析门槛，请补充开奖数据后再操作！")
     else:
-        # 调用全量分析
         full_analysis = get_full_analysis_cached(df, window_value)
-        st.info(f"当前分析维度：{selected_window}，共{full_analysis['total']}期有效数据")
+        st.info(f"当前分析维度：{selected_window}，共{full_analysis['total_periods']}期有效数据")
         st.divider()
-        
-        # 1. 冷热号统计
+
         st.subheader("🔥 冷热号统计TOP10")
         col_hot, col_cold = st.columns(2)
         with col_hot:
@@ -604,389 +720,112 @@ with tab3:
             st.bar_chart(cold_df.set_index("号码"), use_container_width=True)
         
         st.divider()
-        # 2. 遗漏值全表
         st.subheader("📉 遗漏值全维度统计（含回补概率）")
         st.dataframe(full_analysis["miss_analysis"]["miss_df"], hide_index=True, use_container_width=True, height=400)
         
         st.divider()
-        # 3. 基础分布统计
         st.subheader("📈 基础分布统计")
         col_road, col_con, col_zone = st.columns(3)
         with col_road:
             st.markdown("**012路分布**")
-            road_data = full_analysis["road"]
+            road_data = full_analysis["road_distribution"]
             road_df = pd.DataFrame({
                 "路数": ["0路", "1路", "2路"],
-                "出现次数": [road_data["r0"], road_data["r1"], road_data["r2"]],
-                "占比": [road_data["r0r"], road_data["r1r"], road_data["r2r"]]
-            })
-            st.dataframe(road_df, hide_index=True, use_container_width=True)
-            st.bar_chart(road_df.set_index("路数"), use_container_width=True)
-        with col_con:
-            st.markdown("**连号统计**")
-            con_data = full_analysis["con"]
-            con_df = pd.DataFrame({
-                "指标": ["平均连号数", "最多连号数", "最少连号数"],
-                "数值": [f"{con_data['avg']:.1f}个", f"{con_data['max']}个", f"{con_data['min']}个"]
-            })
-            st.dataframe(con_df, hide_index=True, use_container_width=True)
-        with col_zone:
-            st.markdown("**4区间分布**")
-            zone_data = full_analysis["zone"]
-            zone_df = pd.DataFrame({
-                "区间": ["1-20小号区", "21-40中号区", "41-60大号区", "61-80超大号区"],
-                "出现次数": [zone_data["z1"], zone_data["z2"], zone_data["z3"], zone_data["z4"]],
-                "占比": [zone_data["z1r"], zone_data["z2r"], zone_data["z3r"], zone_data["z4r"]]
-            })
-            st.dataframe(zone_df, hide_index=True, use_container_width=True)
-            st.bar_chart(zone_df.set_index("区间"), use_container_width=True)
-        
-        st.divider()
-        # 4. 相随号&跟随号TOP10
-        col_co, col_follow = st.columns(2)
-        with col_co:
-            st.subheader("👥 相随号TOP10（同现频率最高）")
-            co_data = []
-            for (a,b), cnt in full_analysis["co_occur_matrix"]["top10"]:
-                co_data.append({"号码对": f"{a:02d} & {b:02d}", "同现次数": cnt})
-            st.dataframe(pd.DataFrame(co_data), hide_index=True, use_container_width=True)
-        with col_follow:
-            st.subheader("👣 跟随号TOP10（跨期跟随最高）")
-            follow_data = []
-            for (a,b), cnt in full_analysis["follow_matrix"]["top10"]:
-                follow_data.append({"上期A→下期B": f"{a:02d} → {b:02d}", "跟随次数": cnt})
-            st.dataframe(pd.DataFrame(follow_data), hide_index=True, use_container_width=True)
-
-# ========== Tab5 单期深度复盘（同源函数+np.int64彻底修复） ==========
-with tab5:
-    st.header("📝 单期深度复盘")
-    st.info("支持历史期号一键复盘/手动录入号码实时复盘，与跨期对比模块数据100%同源对齐")
-    # 复盘模式选择
-    review_mode = st.radio("选择复盘方式", ["选择历史期号", "手动录入新期号码"], horizontal=True)
-    
-    if review_mode == "选择历史期号":
-        period_list = df["period"].tolist()
-        selected_period = st.selectbox("选择要复盘的期号", period_list)
-        if st.button("生成深度复盘报告", use_container_width=True, type="primary"):
-            # 读取当期&上期数据（强制转int，根除np.int64）
-            current_row = df[df["period"] == selected_period].iloc[0]
-            current_nums = [int(x) for x in current_row.iloc[1:21].tolist()]
-            current_idx = df[df["period"] == selected_period].index[0]
-            # 上期数据边界处理
-            prev_nums = None
-            if current_idx < len(df)-1:
-                prev_row = df.iloc[current_idx+1]
-                prev_nums = [int(x) for x in prev_row.iloc[1:21].tolist()]
+                "出现次数": [road_data["road0"], road_data["road1"], road_data["road2"]],
+                "占比": [road_data["road0_rate"], road_data["road1_rate"], road_data["road2_rate"]]
+            with col_filter2:
+                filter_play = st.multiselect(
+                    "按玩法类型筛选",
+                    options=sorted(all_comb_df["玩法类型"].unique()),
+                    default=sorted(all_comb_df["玩法类型"].unique())
+                )
             
-            # 同源调用分析函数（和跨期对比完全一致）
-            review_result = generate_deep_review(current_nums, prev_nums, selected_period)
-            full_analysis = get_full_analysis_cached(df)
-            num_status_dict = get_num_status(full_analysis)
+            # 数据过滤逻辑
+            filtered_df = all_comb_df[
+                (all_comb_df["期号"].isin(filter_period)) &
+                (all_comb_df["玩法类型"].isin(filter_play))
+            ].sort_values("期号", ascending=False).reset_index(drop=True)
             
-            # 格式化美化输出（彻底清除np标记）
-            con_show = "、".join(review_result["con"]) if review_result["con"] else "无"
-            repeat_show = "、".join([f"{x:02d}" for x in review_result["repeat"]]) if review_result["repeat"] else "无"
-            oblique_show = "、".join([f"{x:02d}" for x in review_result["oblique"]]) if review_result["oblique"] else "无"
-            # 同尾号格式化
-            tail_format_list = []
-            for tail_key, tail_nums in review_result["tail"].items():
-                clean_tail = int(tail_key)
-                clean_nums = "、".join([f"{x:02d}" for x in tail_nums])
-                tail_format_list.append(f"尾{clean_tail}：{clean_nums}")
-            tail_show = " | ".join(tail_format_list) if tail_format_list else "无"
-            
-            # 页面渲染
             st.divider()
-            st.subheader(f"福彩快乐8 {selected_period}期 深度复盘报告")
-            st.markdown("### 一、官方开奖号码")
-            nums_formatted = " ".join([fmt_num(n, num_status_dict) for n in review_result["nums"]])
-            st.markdown(nums_formatted, unsafe_allow_html=True)
+            st.subheader("📊 往期选号组合总览表")
+            st.dataframe(filtered_df, hide_index=True, use_container_width=True, height=300)
             
-            st.markdown("### 二、核心指标汇总")
-            metrics_df = pd.DataFrame([
-                ["奇偶比", review_result["oe"], "10:10", f"差值{abs(review_result['odd']-review_result['even'])}个"],
-                ["大小比", review_result["sl"], "10:10", "完全均衡" if review_result["small"]==review_result["large"] else "微偏"],
-                ["012路比", review_result["road"], "7:7:6", "整体均衡"],
-                ["质合比", review_result["pc"], "6:14", "合数热开" if review_result["composite"]>14 else "质数热开"],
-                ["和值", review_result["sum"], "810", "常规区间"],
-                ["跨度", review_result["span"], "60", "覆盖全区间"],
-                ["连号组数", review_result["con_cnt"], "4.2", "连号退潮" if review_result["con_cnt"]<3 else "连号活跃"],
-                ["重号数量", review_result["repeat_cnt"], "3.5", "重号活跃" if review_result["repeat_cnt"]>4 else "正常"]
-            ], columns=["指标", "本期结果", "理论均值", "核心定性"])
-            st.dataframe(metrics_df, hide_index=True, use_container_width=True)
+            # 下载&详情选择控件
+            if not filtered_df.empty:
+                col_down1, col_down2 = st.columns(2)
+                with col_down1:
+                    # 批量下载筛选后的组合
+                    csv_batch_data = filtered_df.to_csv(index=False, encoding="utf-8-sig")
+                    st.download_button(
+                        label="📥 下载筛选后的选号组合汇总CSV",
+                        data=csv_batch_data,
+                        file_name="快乐8往期选号组合汇总.csv",
+                        mime="text/csv",
+                        use_container_width=True
+                    )
+                with col_down2:
+                    # 单期详情筛选
+                    selected_detail_period = st.selectbox(
+                        "选择单期查看详情&正确率复盘",
+                        options=sorted(filtered_df["期号"].unique(), reverse=True)
+                    )
             
-            st.markdown("### 三、号码结构深度拆解")
-            st.markdown(f"- 连号：{con_show}")
-            st.markdown(f"- 重号（与上期）：{repeat_show}（共{review_result['repeat_cnt']}个）")
-            st.markdown(f"- 同尾号：{tail_show}（共{review_result['tail_cnt']}组）")
-            st.markdown(f"- 斜连号（与上期）：{oblique_show}（共{review_result['oblique_cnt']}个）")
-            st.caption("以上仅为历史数据复盘，不构成任何购彩建议")
-    
-    else:
-        # 手动录入模式
-        with st.form("manual_review_form", border=True):
-            manual_period = st.text_input("期号（如：2026089）", placeholder="例：2026089")
-            manual_nums = st.text_input("开奖号码（20个数字，空格分隔）", placeholder="例：08 09 13 14 ... 80")
-            submit_manual = st.form_submit_button("生成复盘报告", use_container_width=True, type="primary")
-            
-            if submit_manual:
-                # 校验
-                if not manual_period or not manual_period.isdigit():
-                    st.error("❌ 期号必须为非空纯数字！")
+            # 单期详情+正确率复盘核心模块
+            if 'selected_detail_period' in locals() and selected_detail_period and not filtered_df.empty:
+                st.divider()
+                st.subheader(f"📋 {selected_detail_period}期 选号组合详情&正确率复盘")
+                
+                # 匹配当期官方开奖号码
+                if selected_detail_period in df["period"].values:
+                    real_draw_nums = [int(x) for x in df[df["period"] == selected_detail_period].iloc[0].iloc[1:21].tolist()]
+                    st.markdown(f"**当期官方开奖号码**：{' '.join([f'{x:02d}' for x in real_draw_nums])}")
+                    
+                    # 提取该期所有选号方案
+                    period_detail_df = filtered_df[filtered_df["期号"] == selected_detail_period].reset_index(drop=True)
+                    
+                    # 遍历每个方案计算正确率并展示
+                    for idx, row in period_detail_df.iterrows():
+                        st.markdown(f"---\n#### {row['方案编号']} | {row['玩法类型']}")
+                        # 拆分选号号码为数字列表
+                        plan_nums = [int(x.strip()) for x in row["选号号码"].split(" ")]
+                        # 计算匹配率
+                        plan_match_result = calc_match_rate(plan_nums, real_draw_nums)
+                        
+                        # 三列布局展示详情
+                        col_plan1, col_plan2, col_plan3 = st.columns(3)
+                        with col_plan1:
+                            st.markdown(f"**选号号码**：{row['选号号码']}")
+                        with col_plan2:
+                            st.metric("精准匹配个数", f"{plan_match_result['匹配个数']}个")
+                        with col_plan3:
+                            st.metric("方案命中率", f"{plan_match_result['正确率%']}%")
+                        
+                        # 匹配号码展示
+                        if plan_match_result['匹配号码']:
+                            st.markdown(f"**命中号码**：{'、'.join([f'{x:02d}' for x in plan_match_result['匹配号码']])}")
+                        else:
+                            st.markdown("**命中号码**：无")
                 else:
-                    num_valid, num_msg = validate_numbers(manual_nums.strip().split())
-                    if not num_valid:
-                        st.error(f"❌ {num_msg}")
-                    else:
-                        # 读取上期最新数据
-                        prev_nums = [int(x) for x in df.iloc[0].iloc[1:21].tolist()] if total>0 else None
-                        review_result = generate_deep_review(num_msg, prev_nums, manual_period)
-                        full_analysis = get_full_analysis_cached(df)
-                        num_status_dict = get_num_status(full_analysis)
-                        
-                        # 格式化输出
-                        con_show = "、".join(review_result["con"]) if review_result["con"] else "无"
-                        repeat_show = "、".join([f"{x:02d}" for x in review_result["repeat"]]) if review_result["repeat"] else "无"
-                        oblique_show = "、".join([f"{x:02d}" for x in review_result["oblique"]]) if review_result["oblique"] else "无"
-                        tail_format_list = []
-                        for tail_key, tail_nums in review_result["tail"].items():
-                            clean_tail = int(tail_key)
-                            clean_nums = "、".join([f"{x:02d}" for x in tail_nums])
-                            tail_format_list.append(f"尾{clean_tail}：{clean_nums}")
-                        tail_show = " | ".join(tail_format_list) if tail_format_list else "无"
-                        
-                        # 渲染
-                        st.divider()
-                        st.subheader(f"福彩快乐8 {manual_period}期 深度复盘报告")
-                        st.markdown("### 一、开奖号码")
-                        nums_formatted = " ".join([fmt_num(n, num_status_dict) for n in review_result["nums"]])
-                        st.markdown(nums_formatted, unsafe_allow_html=True)
-                        
-                        st.markdown("### 二、核心指标汇总")
-                        metrics_df = pd.DataFrame([
-                            ["奇偶比", review_result["oe"], "10:10", f"差值{abs(review_result['odd']-review_result['even'])}个"],
-                            ["大小比", review_result["sl"], "10:10", "完全均衡" if review_result["small"]==review_result["large"] else "微偏"],
-                            ["012路比", review_result["road"], "7:7:6", "整体均衡"],
-                            ["质合比", review_result["pc"], "6:14", "合数热开" if review_result["composite"]>14 else "质数热开"],
-                            ["和值", review_result["sum"], "810", "常规区间"],
-                            ["跨度", review_result["span"], "60", "覆盖全区间"],
-                            ["连号组数", review_result["con_cnt"], "4.2", "连号退潮" if review_result["con_cnt"]<3 else "连号活跃"],
-                            ["重号数量", review_result["repeat_cnt"], "3.5", "重号活跃" if review_result["repeat_cnt"]>4 else "正常"]
-                        ], columns=["指标", "本期结果", "理论均值", "核心定性"])
-                        st.dataframe(metrics_df, hide_index=True, use_container_width=True)
-                        
-                        st.markdown("### 三、号码结构深度拆解")
-                        st.markdown(f"- 连号：{con_show}")
-                        st.markdown(f"- 重号（与上期）：{repeat_show}（共{review_result['repeat_cnt']}个）")
-                        st.markdown(f"- 同尾号：{tail_show}（共{review_result['tail_cnt']}组）")
-                        st.markdown(f"- 斜连号（与上期）：{oblique_show}（共{review_result['oblique_cnt']}个）")
-                        
-                        # 一键保存到号码库
-                        if manual_period not in df["period"].values:
-                            if st.button("✅ 一键保存到号码库", type="primary", use_container_width=True):
-                                save_success = save_new_data(manual_period, num_msg)
-                                if save_success:
-                                    st.success(f"✅ 成功将{manual_period}期数据保存到号码库！")
-                                    load_data_cached.clear()
-                                    get_full_analysis_cached.clear()
-                                    st.rerun()
-                        st.caption("以上仅为历史数据复盘，不构成任何购彩建议")
+                    st.warning(f"⚠️ 未找到{selected_detail_period}期的官方开奖数据，无法进行正确率复盘")
 
-# ========== Tab6 跨期对比与预测号码池（同源对齐+自动存档） ==========
-with tab6:
-    st.header("🔄 跨期对比与预测号码池")
-    st.info("与单期复盘模块共用同一套分析函数，数据100%一致；自动生成二/三级预测号并单独存档")
-    period_list = df["period"].tolist()
-    selected_current_period = st.selectbox("选择【本期】分析期号（系统自动匹配上期数据）", period_list)
-    
-    if st.button("生成跨期对比+预测号码池并自动存档", use_container_width=True, type="primary"):
-        # 读取本期&上期数据（强制转int）
-        current_idx = df[df["period"] == selected_current_period].index[0]
-        current_row = df.iloc[current_idx]
-        current_nums = [int(x) for x in current_row.iloc[1:21].tolist()]
-        # 上期数据边界处理
-        prev_nums = None
-        prev_period = None
-        if current_idx < len(df)-1:
-            prev_row = df.iloc[current_idx+1]
-            prev_nums = [int(x) for x in prev_row.iloc[1:21].tolist()]
-            prev_period = prev_row["period"]
-        
-        # 同源调用分析函数（和单期复盘完全一致，保证数据对齐）
-        prev_review = generate_deep_review(prev_nums, None, prev_period) if prev_nums else None
-        curr_review = generate_deep_review(current_nums, prev_nums, selected_current_period)
-        full_analysis = get_full_analysis_cached(df)
-        num_status_dict = get_num_status(full_analysis)
-        
-        # 生成分级预测池
-        pool_result = generate_leveled_pool(
-            current_nums,
-            full_analysis["co_occur_matrix"]["dict"],
-            full_analysis["follow_matrix"]["dict"],
-            num_status_dict
-        )
-        
-        # 核心功能：二/三级预测号单独存档为「xxx期预测号.csv」
-        save_file_path = save_predict_num(
-            selected_current_period,
-            list(pool_result["l2"]),
-            list(pool_result["l3"])
-        )
-        st.success(f"✅ 预测号已自动存档：{save_file_path}，二/三级候选单独存储完成！")
-        
-        # 双期同源数据对比
-        st.divider()
-        col_prev, col_curr = st.columns(2)
-        with col_prev:
-            st.subheader(f"📋 上期复盘：{prev_period}期（同源数据）")
-            if prev_review:
-                st.markdown(f"**开奖号码**：{' '.join([f'{x:02d}' for x in prev_review['nums']])}")
-                st.markdown(f"- 奇偶比：{prev_review['oe']}")
-                st.markdown(f"- 大小比：{prev_review['sl']}")
-                st.markdown(f"- 012路：{prev_review['road']}")
-                st.markdown(f"- 连号组数：{prev_review['con_cnt']}组")
-            else:
-                st.info("无匹配上期数据")
-        with col_curr:
-            st.subheader(f"📋 本期复盘：{selected_current_period}期（同源对齐）")
-            st.markdown(f"**开奖号码**：{' '.join([f'{x:02d}' for x in curr_review['nums']])}")
-            st.markdown(f"- 奇偶比：{curr_review['oe']}")
-            st.markdown(f"- 大小比：{curr_review['sl']}")
-            st.markdown(f"- 012路：{curr_review['road']}")
-            st.markdown(f"- 连号组数：{curr_review['con_cnt']}组")
-            st.markdown(f"- 与上期重号：{curr_review['repeat_cnt']}个")
-        
-        st.divider()
-        # 分级预测池详情
-        st.subheader("🎯 下一期预测号码池（分层级）")
-        co_map = pool_result["co"]
-        follow_map = pool_result["follow"]
-        for n in current_nums:
-            n_formatted = fmt_num(n, num_status_dict)
-            st.markdown(f"#### 🔹 第一层：本期号码 {n_formatted}", unsafe_allow_html=True)
-            co_list = co_map.get(n, [])
-            if co_list:
-                co_str = "、".join([fmt_num(b, num_status_dict) + f"(同现{c}次)" for b,c in co_list])
-                st.markdown(f"&nbsp;&nbsp;&nbsp;&nbsp;🔸 第二层：相随号 → {co_str}", unsafe_allow_html=True)
-                for b, c_co in co_list:
-                    fo_list = follow_map.get(b, [])
-                    if fo_list:
-                        fo_str = "、".join([fmt_num(f, num_status_dict) + f"(跟随{c_f}次)" for f,c_f in fo_list])
-                        b_formatted = fmt_num(b, num_status_dict)
-                        st.markdown(f"&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;🔹 第三层：{b_formatted}的跟随号 → {fo_str}", unsafe_allow_html=True)
-        
-        st.divider()
-        # 按出现次数分类汇总
-        st.subheader("📊 预测候选号码汇总（按出现次数分类）")
-        st.markdown("#### 🔹 一级候选：本期开奖号码")
-        l1_formatted = " ".join([fmt_num(n, num_status_dict) for n in sorted(pool_result["l1"], key=lambda x: num_status_dict[x]["cnt"], reverse=True)])
-        st.markdown(f"**出现1次**：{l1_formatted}", unsafe_allow_html=True)
-        
-        level2_groups = pool_result["l2_group"]
-        if level2_groups:
-            st.markdown("#### 🔸 二级候选：本期号码Top3相随号（已存档）")
-            for cnt, nums in level2_groups:
-                nums_sorted = sorted(nums, key=lambda x: num_status_dict[x]["cnt"], reverse=True)
-                nums_formatted = " ".join([fmt_num(n, num_status_dict) for n in nums_sorted])
-                st.markdown(f"**出现{cnt}次**：{nums_formatted}", unsafe_allow_html=True)
-        
-        level3_groups = pool_result["l3_group"]
-        if level3_groups:
-            st.markdown("#### 🔹 三级候选：相随号Top2跟随号（已存档）")
-            for cnt, nums in level3_groups:
-                nums_sorted = sorted(nums, key=lambda x: num_status_dict[x]["cnt"], reverse=True)
-                nums_formatted = " ".join([fmt_num(n, num_status_dict) for n in nums_sorted])
-                st.markdown(f"**出现{cnt}次**：{nums_formatted}", unsafe_allow_html=True)
+# ========== 闭合往期回顾子标签、多玩法主标签 ==========
+        # 空数据兜底提示
+        else:
+            st.info("暂无往期选号组合存档，请先在「生成选号方案」模块生成并存档选号组合")
 
-# ========== Tab4 多玩法选号参考（嵌套预测号+正确率比对+存档+迭代优化） ==========
-with tab4:
-    st.header("🔮 多玩法选号参考（娱乐性）")
-    st.warning("⚠️ 所有内容仅为历史数据娱乐参考，彩票开奖完全随机，不构成任何购彩建议！")
-    st.info("核心功能：读取存档预测号生成方案、开奖VS预测正确率比对、选号组合自动存档、迭代优化建议")
-    
-    # 读取对应期预测号
-    period_list = df["period"].tolist()
-    selected_predict_period = st.selectbox("选择读取对应期预测号", period_list)
-    # 读取预测号存档
-    predict_df = load_predict_num(selected_predict_period)
-    # 读取对应期真实开奖号码
-    real_nums = [int(x) for x in df[df["period"] == selected_predict_period].iloc[0].iloc[1:21].tolist()] if selected_predict_period in df["period"].values else []
-    
-    if predict_df is not None:
-        st.success(f"✅ 成功读取{selected_predict_period}期预测号存档！")
-        all_predict_nums = predict_df["号码"].tolist()
-        
-        # 新增1：预测号VS开奖号码正确率实时验算
-        st.divider()
-        st.subheader("📈 预测号VS开奖号码正确率验算")
-        match_result = calc_match_rate(all_predict_nums, real_nums)
-        col_match1, col_match2, col_match3 = st.columns(3)
-        with col_match1:
-            st.metric("预测号码总数", f"{len(all_predict_nums)}个")
-        with col_match2:
-            st.metric("精准匹配个数", f"{match_result['匹配个数']}个")
-        with col_match3:
-            st.metric("预测正确率", f"{match_result['正确率%']}%")
-        st.write(f"精准匹配号码：{'、'.join([f'{x:02d}' for x in match_result['匹配号码']])}")
-        
-        st.divider()
-        # 玩法选择+方案生成（从预测号内挑选）
-        st.subheader("🎯 从预测号内生成选号方案")
-        play_type = st.selectbox("选择玩法类型", list(PLAY_RULE.keys()))
-        plan_count = st.slider("生成方案数量", min_value=1, max_value=5, value=3)
-        
-        # 从预测号内生成方案
-        full_analysis = get_full_analysis_cached(df)
-        play_plans = gen_play_plan(full_analysis, play_type, all_predict_nums, plan_count)
-        
-        # 核心功能：选号组合自动存档为「xxx期选号组合.csv」
-        save_comb_path = save_select_comb(selected_predict_period, play_type, play_plans)
-        st.success(f"✅ 选号组合已自动存档：{save_comb_path}，可用于后续复盘追溯！")
-        
-        st.divider()
-        # 方案展示+VS开奖比对
-        st.subheader(f"📋 {play_type}玩法选号方案（共{plan_count}组）")
-        num_status_dict = get_num_status(full_analysis)
-        for idx, plan in enumerate(play_plans):
-            st.markdown(f"#### 方案{idx+1}")
-            plan_formatted = " ".join([fmt_num(n, num_status_dict) for n in plan])
-            st.markdown(plan_formatted, unsafe_allow_html=True)
-            # 单方案正确率验算
-            plan_match = calc_match_rate(plan, real_nums)
-            st.caption(f"纯号码：{' '.join([f'{n:02d}' for n in plan])} | 匹配个数：{plan_match['匹配个数']}个 | 正确率：{plan_match['正确率%']}%")
-        
-        st.divider()
-        # 新增2：迭代优化建议（为下一期选号提供方案）
-        st.subheader("💡 下一期选号迭代优化建议")
-        # 逻辑修复调整
-        hot_nums = [x[0] for x in full_analysis["hot_cold"]["hot_top10"]]
-        cold_nums = [x[0] for x in full_analysis["hot_cold"]["cold_top10"]]
-        miss_df = full_analysis["miss_analysis"]["miss_df"]
-        high_back_nums = miss_df[miss_df["回补概率%"].astype(float) >= 80]["号码"].tolist()
-        
-        st.markdown(f"""
-        1. **冷热配比优化**：本期高匹配方案冷热占比为1:1，下期建议保持3热+2冷+3高回补号的均衡配比，避免极端冷热
-        2. **号码池筛选**：优先保留本期匹配命中的二级相随号，剔除连续2期未命中的三级跟随号
-        3. **结构优化**：历史高命中方案均包含1-2组连号、012路分布接近7:7:6，下期方案需严格遵循此结构
-        4. **高回补优先**：重点关注当前遗漏值超过平均遗漏80%的号码：{'、'.join([f'{x:02d}' for x in high_back_nums[:5]])}，这类号码回补概率极高
-        5. **重号参考**：历史平均每期重号3-4个，下期建议保留2-3个本期开奖的热号作为重号候选
-        """)
-    else:
-        st.warning(f"⚠️ 未找到{selected_predict_period}期预测号存档，请先在「跨期对比」模块生成并存档预测号！")
-
-# ========== Tab7 数据管理与重置（完整闭合+无语法错误） ==========
+# ========== Tab7 数据管理与重置（完整补全，闭合所有主标签）==========
 with tab7:
     st.header("⚙️ 数据管理与重置")
-    st.info("支持原始数据备份、一键重置、存档文件管理")
+    st.info("支持原始开奖数据备份、存档文件管理、一键重置初始化、数据统计总览")
     
-    # 1. 原始CSV数据备份下载
+    # 1. 原始开奖数据备份下载
     st.subheader("📄 原始开奖数据备份")
-    st.markdown("下载系统底层CSV原始文件，可用于迁移、恢复、手动编辑")
+    st.markdown("下载系统底层使用的CSV原始文件，可用于数据迁移、手动编辑、灾备恢复")
     if os.path.exists(DATA_FILE):
         with open(DATA_FILE, "rb") as f:
             csv_raw_data = f.read()
         st.download_button(
-            label="📥 下载原始CSV备份文件",
+            label="📥 下载完整开奖数据CSV备份",
             data=csv_raw_data,
             file_name=f"kl8_history_data_backup_{df.iloc[0]['period']}.csv",
             mime="text/csv",
@@ -996,76 +835,79 @@ with tab7:
         st.warning("数据文件不存在，请先初始化系统")
     
     st.divider()
-    # 2. 存档文件管理
-    st.subheader("📂 预测号/选号组合存档管理")
+    # 2. 预测号/选号组合存档文件管理
+    st.subheader("📂 存档文件管理（预测号/选号组合）")
     if os.path.exists(SAVE_DIR):
-        save_files = os.listdir(SAVE_DIR)
-        if save_files:
-            st.write(f"当前存档文件总数：{len(save_files)}个")
-            for file in save_files:
-                file_path = os.path.join(SAVE_DIR, file)
+        save_file_list = os.listdir(SAVE_DIR)
+        if save_file_list:
+            st.write(f"当前存档文件总数：{len(save_file_list)}个")
+            # 遍历所有存档文件提供下载
+            for file_name in save_file_list:
+                file_path = os.path.join(SAVE_DIR, file_name)
                 with open(file_path, "rb") as f:
-                    st.download_button(
-                        label=f"下载 {file}",
-                        data=f.read(),
-                        file_name=file,
-                        use_container_width=True
-                    )
+                    file_data = f.read()
+                st.download_button(
+                    label=f"下载 {file_name}",
+                    data=file_data,
+                    file_name=file_name,
+                    use_container_width=True
+                )
         else:
-            st.info("暂无存档文件，请先生成预测号/选号组合")
+            st.info("暂无存档文件，先生成预测号/选号组合后自动创建存档")
     else:
-        st.info("存档文件夹未创建，生成预测号后自动创建")
+        st.info("存档文件夹未创建，生成预测号后自动初始化")
     
     st.divider()
-    # 3. 数据统计总览
-    st.subheader("📈 数据统计总览")
+    # 3. 全量数据统计总览
+    st.subheader("📈 全量数据统计总览")
     col_stat1, col_stat2, col_stat3, col_stat4 = st.columns(4)
     with col_stat1:
-        st.metric("总收录期数", f"{total}期")
+        st.metric("总收录期数", f"{total_periods}期")
     with col_stat2:
-        st.metric("最早期号", df.iloc[-1]["period"] if total > 0 else "无")
+        st.metric("最早期号", df.iloc[-1]["period"] if total_periods > 0 else "无")
     with col_stat3:
-        st.metric("最新期号", df.iloc[0]["period"] if total > 0 else "无")
+        st.metric("最新期号", df.iloc[0]["period"] if total_periods > 0 else "无")
     with col_stat4:
-        st.metric("总号码记录数", f"{total * 20}个")
+        st.metric("总号码记录数", f"{total_periods * 20}个")
     
-    # 号码出现次数总览
-    st.markdown("#### 号码出现次数全量统计")
+    # 号码出现次数全量统计
+    st.markdown("#### 号码出现次数全量统计排行")
     full_analysis = get_full_analysis_cached(df)
-    count_df = pd.DataFrame({
+    count_stat_df = pd.DataFrame({
         "号码": range(1, 81),
-        "总出现次数": [full_analysis["hot_cold"]["full"][n] for n in range(1, 81)]
+        "总出现次数": [full_analysis["hot_cold"]["full_counter"][n] for n in range(1, 81)]
     }).sort_values("总出现次数", ascending=False)
-    st.dataframe(count_df, hide_index=True, use_container_width=True, height=300)
+    st.dataframe(count_stat_df, hide_index=True, use_container_width=True, height=300)
     
     st.divider()
-    # 4. 数据重置功能（完整闭合，无括号错误）
-    st.subheader("⚠️ 数据重置（危险操作）")
-    st.error("此操作会清空所有自定义录入数据，恢复为初始88期基准数据，不可恢复！")
+    # 4. 数据重置功能（完整闭合，无语法错误）
+    st.subheader("⚠️ 数据重置（危险操作，不可恢复）")
+    st.error("此操作会清空所有自定义录入的开奖数据，恢复为系统初始的88期基准数据，所有存档文件不受影响！")
     with st.form("reset_data_form", border=True):
-        reset_confirm = st.checkbox("我已阅读风险提示，确认要重置所有数据，恢复为初始88期基准数据")
-        reset_submit = st.form_submit_button("执行数据重置", type="secondary", use_container_width=True)
+        reset_confirm_check = st.checkbox("我已阅读风险提示，确认要重置所有开奖数据，恢复为初始88期基准数据")
+        reset_submit_btn = st.form_submit_button("执行数据重置", type="secondary", use_container_width=True)
         
-        if reset_submit:
-            if reset_confirm:
-                # 完整闭合open函数，根治括号未闭合报错
+        # 重置逻辑
+        if reset_submit_btn:
+            if reset_confirm_check:
+                # 完整闭合open函数，无括号未闭合错误
                 with open(DATA_FILE, 'w', newline='', encoding='utf-8') as f:
                     writer = csv.writer(f)
-                    writer.writerow(['period'] + [f'n{i}' for i in range(1,21)])
+                    writer.writerow(['period'] + [f'n{i}' for i in range(1, 21)])
                     writer.writerows(INIT_DATA)
-                # 清除缓存刷新
+                # 清除缓存强制刷新
                 load_data_cached.clear()
                 get_full_analysis_cached.clear()
-                st.success("✅ 数据已成功重置为初始88期基准数据！页面即将刷新...")
+                st.success("✅ 数据已成功重置为初始88期基准数据！页面即将自动刷新...")
                 st.rerun()
             else:
-                st.error("❌ 请先勾选确认框，阅读风险提示后再执行重置操作！")
+                st.error("❌ 请先勾选确认框，阅读并接受风险提示后再执行重置操作！")
 
-# ====================== 全局尾部合规声明（完整闭合所有代码） ======================
+# ====================== 全局尾部合规声明（完整闭合所有代码，无未闭合块）======================
 st.divider()
 st.markdown("""
 <div style="text-align: center; color: #666; font-size: 14px; line-height: 1.8; padding: 10px 0;">
 ⚠️ 本系统仅用于福彩快乐8历史开奖数据的统计与娱乐性分析，彩票开奖为完全随机独立事件<br>
-所有分析结果、选号参考均不构成任何购彩建议，请理性购彩，量力而行，遵守国家相关法律法规
+所有分析结果、选号参考、预测内容均不构成任何购彩建议，请理性购彩，量力而行，遵守国家相关法律法规
 </div>
-""", unsafe_allow_html=True)
+""", unsafe_allow_html=True) 
