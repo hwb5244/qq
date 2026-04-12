@@ -819,6 +819,33 @@ with tab4:
         return two_continuous, three_continuous, list(n1)
 
     @st.cache_data(ttl=0)
+# ========== Tab4 纯代码无注释终极修复版 ==========
+with tab4:
+    st.header("🔮 多玩法选号｜4铁律风控合规")
+    st.error("弃前三期连出 | 降两期连出权重 | 与上期重合率≤20% | 仅使用二/三级候选池")
+    st.tabs(["🎯 合规固化组合生成","📊 同期限预测号VS开奖核对","💡 历史复盘+下期迭代"])
+    gen_tab, check_tab, review_tab = st.tabs(["🎯 合规固化组合生成","📊 同期限预测号VS开奖核对","💡 历史复盘+下期迭代"])
+
+    FIX_PLAY_CONFIG = [
+        {"玩法名称":"11码", "选号个数":11, "固定生成组数":3},
+        {"玩法名称":"8码", "选号个数":8, "固定生成组数":5},
+        {"玩法名称":"6码", "选号个数":6, "固定生成组数":10},
+        {"玩法名称":"3码", "选号个数":3, "固定生成组数":10}
+    ]
+
+    def get_recent_continuous_no(df_target, curr_period):
+        sort_df = df_target.sort_values("period", ascending=False).reset_index(drop=True)
+        curr_idx = sort_df[sort_df["period"] == curr_period].index[0]
+        if curr_idx + 3 >= len(sort_df):
+            return [], [], []
+        n1 = set(sort_df.iloc[curr_idx+1].iloc[1:21].tolist())
+        n2 = set(sort_df.iloc[curr_idx+2].iloc[1:21].tolist())
+        n3 = set(sort_df.iloc[curr_idx+3].iloc[1:21].tolist())
+        two_continuous = list(n1 & n2)
+        three_continuous = list(n1 & n2 & n3)
+        return two_continuous, three_continuous, list(n1)
+
+    @st.cache_data(ttl=0)
     def build_iron_rule_combination(l2_pool, l3_pool, two_con, three_con, last_real_nums, hot12_list, hot24_list, df_back, need_cnt, group_cnt, seed_key):
         candidate_pool = list(set(l2_pool + l3_pool))
         candidate_pool = [n for n in candidate_pool if n not in three_con]
@@ -913,7 +940,7 @@ with tab4:
                     c_nums = [int(x) for x in row["选号号码"].split()]
                     hit_records.append(calc_match_rate(c_nums, real_p)["正确率%"])
             if hit_records:
-                st.metric("历史平均命中率",round(np.mean(hit_records),2))
+                st.metric("历史平均命中率",round(np.mean(hit_records),2)) 
 # ========== Tab5 单期深度复盘【彻底修复空白+全量渲染+数据唯一性保障】 ==========
 with tab5:
     st.header("📝 单期深度复盘")
