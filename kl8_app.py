@@ -1012,26 +1012,114 @@ with tab6:
 st.caption("🔒 技术说明：底层历史数据/核心计算逻辑未修改时，跨期对比结果、预测池号码永久固定不变，无随机变动")
 
 
-# ========== Tab7 设置页 ==========
+# ========== Tab7 设置页【已嵌入一键备份迁移·最终成品版】 ==========
 with tab7:
-    st.header("⚙️数据管理与重置")
+    st.header("⚙️ 数据管理、存档迁移与系统重置")
+    st.info("支持外置存档独立备份、跨代码版本迁移、原始数据下载，更替代码不丢数据")
+
+    # 1. 原始开奖CSV单机备份
+    st.subheader("📄 原始开奖数据单机备份")
     if os.path.exists(DATA_FILE):
         with open(DATA_FILE, "rb") as f:
-            cd = f.read()
-        st.download_button("下载原始CSV备份", cd, f"kl8_backup_{df.iloc[0]['period']}.csv", use_container_width=True)
+            csv_raw_data = f.read()
+        st.download_button(
+            label="📥 下载原始CSV备份文件",
+            data=csv_raw_data,
+            file_name=f"kl8_history_backup_{df.iloc[0]['period']}.csv",
+            mime="text/csv",
+            use_container_width=True
+        )
+    else:
+        st.warning("数据文件不存在，请先初始化系统")
+
     st.divider()
-    with st.form("reset_f"):
-        ck = st.checkbox("确认重置为原始88期数据，不可恢复")
-        if st.form_submit_button("执行重置", type="secondary") and ck:
-            # 文件操作语法完全闭合，无括号遗漏
-            with open(DATA_FILE, 'w', newline='', encoding='utf-8') as f:
-                w = csv.writer(f)
-                w.writerow(['period'] + [f'n{i}' for i in range(1, 21)])
-                w.writerows(INIT_DATA)
-            load_data_cached.clear()
-            get_full_analysis_cached.clear()
-            st.success("重置完成")
-            st.rerun()
+    # 2. 外置存档子文件单独下载
+    st.subheader("📂 分项存档文件管理")
+    if os.path.exists(SAVE_DIR):
+        save_files = os.listdir(SAVE_DIR)
+        if save_files:
+            st.write(f"当期分项存档总数：{len(save_files)}个")
+            for file in save_files:
+                file_path = os.path.join(SAVE_DIR, file)
+                with open(file_path, "rb") as f:
+                    st.download_button(f"下载 {file}", f.read(), file_name=file, use_container_width=True)
+        else:
+            st.info("暂无预测号/组合分项存档")
+
+    st.divider()
+    # 3. 全局数据统计总览
+    st.subheader("📈 全库数据统计看板")
+    col_stat1, col_stat2, col_stat3, col_stat4 = st.columns(4)
+    with col_stat1:
+        st.metric("总收录期数", f"{total}期")
+    with col_stat2:
+        st.metric("最早期号", df.iloc[-1]["period"] if total > 0 else "无")
+    with col_stat3:
+        st.metric("最新期号", df.iloc[0]["period"] if total > 0 else "无")
+    with col_stat4:
+        st.metric("总号码记录数", f"{total * 20}个")
+
+    # -------------------------- 【重点：一键备份/迁移 精准插入在这里】--------------------------
+    st.divider()
+    # 新增：适配代码更替·外置存档一键打包迁移模块
+    st.subheader("💾 全库一键打包备份 | 跨代码/跨电脑迁移专用")
+    # 动态导入压缩依赖（局部导入不污染全局，防报错）
+    try:
+        import shutil
+        import zipfile
+        from datetime import datetime
+
+        # 生成带时间戳的迁移包，防止覆盖
+        zip_name = f"KL8全量外置存档_一键迁移包_{datetime.now().strftime('%Y%m%d%H%M%S')}.zip"
+        zip_path = os.path.join(ARCHIVE_ROOT, zip_name)
+
+        if st.button("📦 开始打包全部外置数据（适配代码更替/换服务器/换电脑）", use_container_width=True, type="primary"):
+            with st.spinner("正在压缩全库存档，请稍候..."):
+                # 遍历整个外置存档根目录打包
+                with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                    for root, dirs, files in os.walk(ARCHIVE_ROOT):
+                        for file in files:
+                            fp = os.path.join(root, file)
+                            # 压缩内保留相对路径，解压直接复原目录结构
+                            arcname = os.path.relpath(fp, ARCHIVE_ROOT)
+                            zipf.write(fp, arcname)
+            st.success("✅ 打包完成！更替代码只需要复制压缩包，新环境解压配置路径即可秒读所有历史数据")
+            # 下载按钮联动
+            with open(zip_path, "rb") as f:
+                st.download_button("⬇️ 下载全库迁移压缩包", f, file_name=zip_name, use_container_width=True)
+
+        # 查看全局存档索引（跨代码溯源所有期号）
+        st.divider()
+        st.subheader("📋 外置存档全局索引总表（全历史检索）")
+        if os.path.exists(INDEX_FILE):
+            index_df = pd.read_csv(INDEX_FILE, encoding="utf-8-sig")
+            st.dataframe(index_df, hide_index=True, use_container_width=True, height=300)
+        else:
+            st.info("暂无存档索引，生成预测号/组合后自动创建")
+    except Exception as e:
+        st.error(f"模块加载提示：{str(e)}，不影响主程序运行，仅迁移功能临时不可用")
+    # ----------------------------------------------------------------------------------------
+
+    st.divider()
+    # 4. 危险区：系统数据重置（保持原有不动）
+    st.subheader("⚠️ 数据重置终极操作（高危不可恢复）")
+    st.error("此操作清空增量数据，仅恢复初始88期基准，更替代码无需点这里！")
+    with st.form("reset_data_form", border=True):
+        reset_confirm = st.checkbox("我已知风险，确认重置回原始88期基准数据")
+        reset_submit = st.form_submit_button("执行数据重置", type="secondary", use_container_width=True)
+        if reset_submit:
+            if reset_confirm:
+                with open(DATA_FILE, 'w', newline='', encoding='utf-8') as f:
+                    writer = csv.writer(f)
+                    writer.writerow(['period'] + [f'n{i}' for i in range(1,21)])
+                    writer.writerows(INIT_DATA)
+                load_data_cached.clear()
+                get_full_analysis_cached.clear()
+                st.success("✅ 已重置为初始基准数据")
+                st.rerun()
+            else:
+                st.error("请勾选确认框后再执行")
+
 
 # ====================== 全局尾部合规声明（语法闭合无遗漏） ======================
 st.divider()
