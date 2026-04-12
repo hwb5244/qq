@@ -1880,16 +1880,6 @@ with tab8:
     else:
         st.info("暂无批量复盘存档，请先点击「开始全量自动复盘」生成数据")
 
-
-
-# ====================== 全局尾部合规声明（语法完全闭合，无裸露文字） ======================
+# ====================== 全局尾部合规声明（顶格无缩进，语法闭合版） ======================
 st.divider()
-# 所有文字必须放在st.markdown的三引号字符串内，绝对不能裸露在外面
-st.markdown(
-    """
-    <div style="text-align:center;color:#666;font-size:14px">
-    温馨提示：本系统仅历史数据统计娱乐，彩票开奖完全随机，不构成任何购彩建议，理性购彩遵守国家法规
-    </div>
-    """, 
-    unsafe_allow_html=True
-)  
+st.markdown("""<div style="text-align:center;color:#666;font-size:14px">温馨提示：本系统仅历史数据统计娱乐，彩票开奖完全随机，不构成任何购彩建议，理性购彩遵守国家法规</div>""", unsafe_allow_html=True)
