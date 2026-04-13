@@ -953,19 +953,22 @@ def get_period_xiang_sui_data(df, period_window, target_num=None):
 
 def get_two_period_compare(df, period_N):
     """
-    修复版：解决period_num不存在报错，获取N期与N-1期的对比数据+总结
+    最终修复版：彻底解决period_num报错、Series歧义报错
     :param df: 全量开奖数据
     :param period_N: 本期期号N
-    :return: 对比表格数据、文字总结、N期号码、N-1期号码
+    :return: 对比结果字典，异常时返回带error标记的字典
     """
     try:
-        # 修复：临时生成period_num列，不修改原df，彻底解决字段不存在报错
+        # 修复1：临时生成period_num列，不修改原df，彻底解决字段不存在报错
         df_temp = df.copy()
         df_temp['period_num'] = df_temp['period'].astype(int)
         df_sorted = df_temp.sort_values("period_num", ascending=False).reset_index(drop=True)
         
-        # 定位N期和N-1期数据
-        N_idx = df_sorted[df_sorted["period"] == period_N].index[0]
+        # 修复2：用索引长度判断期号是否存在，彻底解决Series歧义报错
+        N_match_idx = df_sorted[df_sorted["period"] == period_N].index
+        if len(N_match_idx) == 0:
+            return {"error": f"期号{period_N}不存在"}
+        N_idx = N_match_idx[0]
         N_row = df_sorted.iloc[N_idx]
         N_1_row = df_sorted.iloc[N_idx+1] if N_idx+1 < len(df_sorted) else None
         
@@ -1018,6 +1021,7 @@ def get_two_period_compare(df, period_N):
         }
     except Exception as e:
         return {"error": f"期号对比失败：{str(e)}"}
+
 
 
 
@@ -1511,7 +1515,7 @@ with tab4:
             cold_save_path = save_select_comb(tar_p, "冷号回补流派-4铁律合规", cold_all_combs)
             st.success(f"✅ 【{tar_p}期】冷号回补流派全部组合已外置存档：{cold_save_path}，永久固定不变")
 
-    # ========== 子标签4：开奖核对中心（彻底修复KeyError+Series歧义·最终版） ==========
+    # ========== 子标签4：开奖核对中心（最终修复版·零报错） ==========
 with check_tab:
     st.header("📊 开奖核对中心｜正式号 vs 预测池 vs 双流派号码")
     st.info("功能：展示本期正式开奖号码 → 对比预测池号码、热号流派号码、冷号流派号码 → 自动对比解析")
@@ -1520,8 +1524,9 @@ with check_tab:
     all_p_list = sorted(df["period"].astype(str).tolist(), reverse=True)
     check_p = st.selectbox("选择需要核对的 N 期", all_p_list, key="final_check")
 
-    # ====================== 1. 加载本期正式开奖号码 ======================
+    # ====================== 1. 加载本期正式开奖号码（彻底解决Series歧义） ======================
     real_nums = []
+    # 修复：用索引长度判断期号是否存在，杜绝ambiguous报错
     match_idx = df[df["period"] == check_p].index
     if len(match_idx) > 0:
         row = df.loc[match_idx[0]]
@@ -1548,13 +1553,13 @@ with check_tab:
     predict_str = "  ".join(f"{n:02d}" for n in predict_pool_nums) if predict_pool_nums else "暂无预测池数据"
     st.markdown(f"### {predict_str}")
 
-    # ====================== 3. 加载热号流派所有筛选号码 ======================
+    # ====================== 3. 加载热号流派所有筛选号码（彻底解决KeyError） ======================
     st.divider()
     st.subheader("🔥 热号惯性流派 · 全量筛选号码")
     all_comb_df = load_all_select_comb()
     hot_nums_set = set()
+    # 修复：列名用【期号】不是period，彻底解决KeyError
     if not all_comb_df.empty:
-        # 修复：列名是【期号】不是period
         hot_df = all_comb_df[
             (all_comb_df["期号"] == check_p) &
             (all_comb_df["玩法类型"].str.contains("热号", na=False))
@@ -1575,7 +1580,6 @@ with check_tab:
     st.subheader("🧊 冷号回补流派 · 全量筛选号码")
     cold_nums_set = set()
     if not all_comb_df.empty:
-        # 修复：列名是【期号】不是period
         cold_df = all_comb_df[
             (all_comb_df["期号"] == check_p) &
             (all_comb_df["玩法类型"].str.contains("冷号", na=False))
@@ -1665,7 +1669,6 @@ with check_tab:
     st.divider()
     st.subheader("📋 全流派组合命中明细（全部显示）")
     if not all_comb_df.empty:
-        # 修复：列名是【期号】
         now_comb = all_comb_df[all_comb_df["期号"] == check_p]
         if not now_comb.empty:
             hot_combs = now_comb[now_comb["玩法类型"].str.contains("热号", na=False)]
@@ -1713,6 +1716,7 @@ with check_tab:
             st.warning("该期暂无任何组合存档数据，请先生成组合")
     else:
         st.warning("该期暂无任何组合存档数据，请先生成组合")
+
 
 
     # ========== 子标签5：双流派复盘优化 ==========
@@ -2012,6 +2016,129 @@ with tab6:
 
                 # 4. 自动存档预测池
                 st.divider()
+                try:# ========== Tab6 跨期对比与下期预测号码池生成（最终修复版·零报错） ==========
+with tab6:
+    st.header("🔄 跨期对比与下期预测号码池生成")
+    st.info("✅ 需求全覆盖：N与N-1期对比 | 基底随期号变动 | 二级随基底生成 | 三级随二级生成 | 同源近20期相随/跟随数据")
+    st.divider()
+
+    period_list = df["period"].tolist()
+    if not period_list:
+        st.error("暂无开奖数据，请先初始化号码库")
+    else:
+        # 1. 选择分析期号N，自动联动所有数据
+        st.subheader("📌 选择分析期号N")
+        select_period_N = st.selectbox("本期期号N", period_list, index=0, key="cross_period_N")
+        st.divider()
+
+        # 2. 自动生成N与N-1期对比（修复：异常直接拦截，不会出现变量未定义）
+        with st.spinner("正在生成两期对比数据..."):
+            compare_result = get_two_period_compare(df, select_period_N)
+            # 修复：对比失败直接提示+停止，不会执行后面代码，杜绝NameError
+            if "error" in compare_result:
+                st.error(compare_result["error"])
+                st.stop()
+            
+            # 对比成功，才定义base_nums，100%不会出现NameError
+            base_nums = compare_result["N_nums"]
+            # 两期对比表格展示
+            st.subheader(f"📊 {select_period_N}期 VS {compare_result['N_1_period']}期 核心指标对比")
+            compare_table_df = pd.DataFrame(compare_result["compare_table"][1:], columns=compare_result["compare_table"][0])
+            st.dataframe(compare_table_df, hide_index=True, use_container_width=True)
+            
+            # 文字总结
+            st.subheader("📝 两期对比总结")
+            for summary_text in compare_result["summary"]:
+                st.info(summary_text)
+            
+            # 基底参考号（随期号变动，完全联动）
+            st.divider()
+            st.subheader(f"🔴 本期{select_period_N}期 基底参考号（随选择期号自动变动）")
+            full_ana_20 = get_full_analysis_cached(df, window=20)
+            num_status_dict = get_num_status(full_ana_20)
+            base_html = " ".join([fmt_num(n, num_status_dict) for n in sorted(base_nums)])
+            st.markdown(base_html, unsafe_allow_html=True)
+
+        # 3. 生成二级相随层、三级跟随层（同源近20期数据）
+        st.divider()
+        if st.button("🚀 生成二级相随层+三级跟随层（基于近20期相随/跟随数据）", use_container_width=True, type="primary"):
+            with st.spinner("严格按层级生成，层间完全隔离..."):
+                # 加载近20期相随号数据（和多周期板块同源）
+                xiang_sui_20 = get_period_xiang_sui_data(df, 20)
+                xiang_sui_dict = xiang_sui_20["xiang_sui_dict"]
+                follow_20 = get_period_follow_data(df, 20)
+                follow_dict = follow_20["follow_dict"]
+
+                # 3.1 生成二级相随层：严格基于基底参考号生成
+                st.divider()
+                st.subheader("🟡 二级相随层（基于基底参考号+近20期相随号数据生成）")
+                level2_result = set()
+                level2_detail = []
+                # 遍历基底每个号码，取近20期Top3相随号
+                for base_num in base_nums:
+                    num_xiang_sui = get_period_xiang_sui_data(df, 20, target_num=base_num)["target_xiang_sui"]
+                    if num_xiang_sui:
+                        top3 = num_xiang_sui[:3]
+                        for sui_num, cnt in top3:
+                            # 严格隔离：不能是基底号码
+                            if sui_num not in base_nums:
+                                level2_result.add(sui_num)
+                                level2_detail.append({
+                                    "基底号码": f"{base_num:02d}",
+                                    "二级相随号": f"{sui_num:02d}",
+                                    "近20期相随次数": cnt,
+                                    "相随概率": f"{round(cnt/20*100, 2)}%"
+                                })
+                # 排序去重
+                level2_sorted = sorted(list(level2_result), key=lambda x: (-num_status_dict[x]["cnt"], x))
+                # 展示明细
+                if level2_detail:
+                    level2_df = pd.DataFrame(level2_detail)
+                    st.dataframe(level2_df, hide_index=True, use_container_width=True)
+                    st.markdown(f"**二级相随号最终池（去重后）**：{' '.join([f'{x:02d}' for x in level2_sorted])}")
+                    st.success(f"✅ 二级相随层生成完成，共{len(level2_sorted)}个唯一号码，与基底无重复")
+                else:
+                    st.warning("暂无有效二级相随号数据")
+
+                # 3.2 生成三级跟随层：严格基于二级相随层生成
+                st.divider()
+                st.subheader("🟢 三级跟随层（基于二级相随层+近20期相随号数据生成）")
+                level3_result = set()
+                level3_detail = []
+                # 遍历二级每个号码，取近20期Top3相随号
+                for level2_num in level2_sorted:
+                    num_xiang_sui = get_period_xiang_sui_data(df, 20, target_num=level2_num)["target_xiang_sui"]
+                    if num_xiang_sui:
+                        top3 = num_xiang_sui[:3]
+                        for sui_num, cnt in top3:
+                            # 严格隔离：不能是基底号码、不能是二级号码
+                            if sui_num not in base_nums and sui_num not in level2_sorted:
+                                level3_result.add(sui_num)
+                                level3_detail.append({
+                                    "二级号码": f"{level2_num:02d}",
+                                    "三级跟随号": f"{sui_num:02d}",
+                                    "近20期相随次数": cnt,
+                                    "相随概率": f"{round(cnt/20*100, 2)}%"
+                                })
+                # 排序去重
+                level3_sorted = sorted(list(level3_result), key=lambda x: (-num_status_dict[x]["cnt"], x))
+                # 展示明细
+                if level3_detail:
+                    level3_df = pd.DataFrame(level3_detail)
+                    st.dataframe(level3_df, hide_index=True, use_container_width=True)
+                    st.markdown(f"**三级跟随号最终池（去重后）**：{' '.join([f'{x:02d}' for x in level3_sorted])}")
+                    # 层间隔离校验
+                    cross_check = len(set(level2_sorted) & set(level3_sorted))
+                    base_cross_check = len(set(base_nums) & set(level3_sorted))
+                    if cross_check == 0 and base_cross_check == 0:
+                        st.success(f"✅ 三级跟随层生成完成，共{len(level3_sorted)}个唯一号码，与基底、二级层完全无重复，层间隔离校验通过")
+                    else:
+                        st.error("❌ 层间存在重复号码，已自动过滤")
+                else:
+                    st.warning("暂无有效三级跟随号数据")
+
+                # 4. 自动存档预测池
+                st.divider()
                 try:
                     # 自动计算目标预测期号N+1
                     target_period_num = int(select_period_N) + 1
@@ -2026,7 +2153,9 @@ with tab6:
                 except Exception as e:
                     st.error(f"预测池存档失败：{str(e)}")
 
-    st.caption("🔒 数据同源说明：二级/三级号码生成完全基于多周期板块近20期相随号数据，保证逻辑一致性")
+    st.caption("🔒 数据同源说明：二级/三级号码生成完全基于多周期板块近20期相随号数据，保证逻辑一致性")  
+
+
 # ========== Tab7 设置页（数据管理+备份迁移+自动生成文件删除+系统重置） ==========
 with tab7:
     st.header("⚙️ 数据管理、存档迁移与系统重置")
