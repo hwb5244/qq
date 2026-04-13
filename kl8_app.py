@@ -1511,82 +1511,217 @@ with tab4:
             cold_save_path = save_select_comb(tar_p, "冷号回补流派-4铁律合规", cold_all_combs)
             st.success(f"✅ 【{tar_p}期】冷号回补流派全部组合已外置存档：{cold_save_path}，永久固定不变")
 
-    # ========== 子标签4：开奖核对中心（修复版：兼容手动/批量所有数据） ==========
-    with check_tab:
-        st.header("📊 开奖核对中心")
-        st.info("校验规则：仅核对【开奖前生成】的预测池&组合，分层独立计算、批量数据全显示")
-        all_p_list = df["period"].tolist()
-        check_p = st.selectbox("选择已核对N期", all_p_list, key="final_check")
-        real_nums = df[check_p==df["period"]].iloc[0,1:21].tolist() if check_p in df["period"].values else []
-        pred_check_df = load_predict_num(check_p)
-        all_comb_df = load_all_select_comb()
+    # ========== 子标签4：开奖核对中心（最终定稿·修复Series歧义报错） ==========
+with check_tab:
+    st.header("📊 开奖核对中心｜正式号 vs 预测池 vs 双流派号码")
+    st.info("功能：展示本期正式开奖号码 → 对比预测池号码、热号流派号码、冷号流派号码 → 自动对比解析")
+    
+    # 获取期号列表并倒序排列
+    all_p_list = sorted(df["period"].astype(str).tolist(), reverse=True)
+    check_p = st.selectbox("选择需要核对的 N 期", all_p_list, key="final_check")
 
-        # 分层预测池核对
-        st.subheader(f"【{check_p}期】分层预测池核对")
-        if pred_check_df is not None and not pred_check_df.empty and len(real_nums)>0:
-            is_before = pred_check_df["是否事前预测"].iloc[0] if "是否事前预测" in pred_check_df.columns else "否"
-            st.info(f"生成属性：{'✅事前有效预测' if is_before=='是' else '⚠️事后生成不计分'}")
-            
-            all_pred = pred_check_df["号码"].tolist()
-            res_all = calc_match_rate(all_pred, real_nums)
-            c1,c2,c3=st.columns(3)
-            with c1:st.metric("总预测数",len(all_pred))
-            with c2:st.metric("命中个数",res_all["匹配个数"])
-            with c3:st.metric("总命中率",f"{res_all['正确率%']}%")
+    # ====================== 1. 加载本期正式开奖号码（修复Series歧义） ======================
+    real_nums = []
+    # 修复：用索引判断期号是否存在，杜绝ambiguous报错
+    match_idx = df[df["period"] == check_p].index
+    if len(match_idx) > 0:
+        row = df.loc[match_idx[0]]
+        real_nums = sorted([int(x) for x in row.iloc[1:21].tolist()])
 
-            l2 = pred_check_df[pred_check_df["候选等级"]=="二级相随号"]["号码"].tolist()
-            l3 = pred_check_df[pred_check_df["候选等级"]=="三级跟随号"]["号码"].tolist()
-            res_l2,res_l3 = calc_match_rate(l2,real_nums),calc_match_rate(l3,real_nums)
-            col2,col3=st.columns(2)
-            with col2:
-                st.metric("二级独立命中率",f"{res_l2['正确率%']}%",f"命中{res_l2['匹配个数']}个")
-                st.caption(f"号码：{' '.join(f'{x:02d}'for x in l2)}")
-            with col3:
-                st.metric("三级独立命中率",f"{res_l3['正确率%']}%",f"命中{res_l3['匹配个数']}个")
-                st.caption(f"号码：{' '.join(f'{x:02d}'for x in l3)}")
-                
-            if len(set(l2)&set(l3))==0:
-                st.success("✅层间无重复，分层计算结果真实有效")
+    st.subheader("🔴 本期 N 期正式开奖号码")
+    if real_nums:
+        real_str = "  ".join(f"{n:02d}" for n in real_nums)
+        st.markdown(f"### {real_str}", unsafe_allow_html=True)
+    else:
+        st.error("未找到该期正式开奖号码")
+        st.stop()
+
+    # ====================== 2. 加载预测池（二级相随号+三级跟随号） ======================
+    st.divider()
+    st.subheader("🔵 预测池号码（二级相随号 + 三级跟随号）")
+    pred_check_df = load_predict_num(check_p)
+    predict_pool_nums = []
+    if pred_check_df is not None and not pred_check_df.empty:
+        l2 = pred_check_df[pred_check_df["候选等级"] == "二级相随号"]["号码"].tolist()
+        l3 = pred_check_df[pred_check_df["候选等级"] == "三级跟随号"]["号码"].tolist()
+        predict_pool_nums = sorted(list(set(l2 + l3)))
+
+    predict_str = "  ".join(f"{n:02d}" for n in predict_pool_nums) if predict_pool_nums else "暂无预测池数据"
+    st.markdown(f"### {predict_str}")
+
+    # ====================== 3. 加载热号流派所有筛选号码 ======================
+    st.divider()
+    st.subheader("🔥 热号惯性流派 · 全量筛选号码")
+    all_comb_df = load_all_select_comb()
+    hot_nums_set = set()
+    # 修复：判断期号存在+非空，杜绝Series歧义
+    if not all_comb_df.empty:
+        hot_df = all_comb_df[
+            (all_comb_df["period"] == check_p) &
+            (all_comb_df["玩法类型"].str.contains("热号", na=False))
+        ]
+        if not hot_df.empty:
+            for _, r in hot_df.iterrows():
+                try:
+                    ns = [int(x) for x in str(r["选号号码"]).split()]
+                    hot_nums_set.update(ns)
+                except:
+                    continue
+    hot_nums = sorted(list(hot_nums_set))
+    hot_str = "  ".join(f"{n:02d}" for n in hot_nums) if hot_nums else "暂无热号流派数据"
+    st.markdown(f"### {hot_str}")
+
+    # ====================== 4. 加载冷号流派所有筛选号码 ======================
+    st.divider()
+    st.subheader("🧊 冷号回补流派 · 全量筛选号码")
+    cold_nums_set = set()
+    if not all_comb_df.empty:
+        cold_df = all_comb_df[
+            (all_comb_df["period"] == check_p) &
+            (all_comb_df["玩法类型"].str.contains("冷号", na=False))
+        ]
+        if not cold_df.empty:
+            for _, r in cold_df.iterrows():
+                try:
+                    ns = [int(x) for x in str(r["选号号码"]).split()]
+                    cold_nums_set.update(ns)
+                except:
+                    continue
+    cold_nums = sorted(list(cold_nums_set))
+    cold_str = "  ".join(f"{n:02d}" for n in cold_nums) if cold_nums else "暂无冷号流派数据"
+    st.markdown(f"### {cold_str}")
+
+    # ====================== 5. 自动对比命中统计 ======================
+    st.divider()
+    st.subheader("📈 四者对比命中结果")
+    real_set = set(real_nums)
+    
+    # 计算各模块命中
+    hit_predict = sorted(list(real_set & set(predict_pool_nums)))
+    hit_hot = sorted(list(real_set & hot_nums_set))
+    hit_cold = sorted(list(real_set & cold_nums_set))
+
+    # 三列展示命中数据
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        st.metric("预测池命中个数", len(hit_predict))
+        st.caption("  ".join(f"{x:02d}" for x in hit_predict) if hit_predict else "无命中")
+    with c2:
+        st.metric("热号流派命中个数", len(hit_hot))
+        st.caption("  ".join(f"{x:02d}" for x in hit_hot) if hit_hot else "无命中")
+    with c3:
+        st.metric("冷号流派命中个数", len(hit_cold))
+        st.caption("  ".join(f"{x:02d}" for x in hit_cold) if hit_cold else "无命中")
+
+    # ====================== 6. 自动智能解析 ======================
+    st.divider()
+    st.subheader("📝 自动对比解析")
+    parse_list = []
+    parse_list.append(f"本期正式开奖共 **{len(real_nums)}** 个号码。")
+
+    # 预测池解析
+    if predict_pool_nums:
+        parse_list.append(f"预测池共 **{len(predict_pool_nums)}** 个号码，命中 **{len(hit_predict)}** 个。")
+    else:
+        parse_list.append("预测池暂无数据，无法对比。")
+
+    # 热号流派解析
+    if hot_nums:
+        parse_list.append(f"热号流派共筛选 **{len(hot_nums)}** 个号码，命中 **{len(hit_hot)}** 个。")
+    else:
+        parse_list.append("热号流派暂无数据，无法对比。")
+
+    # 冷号流派解析
+    if cold_nums:
+        parse_list.append(f"冷号流派共筛选 **{len(cold_nums)}** 个号码，命中 **{len(hit_cold)}** 个。")
+    else:
+        parse_list.append("冷号流派暂无数据，无法对比。")
+
+    # 开奖区间分布解析
+    def get_zone(n):
+        if 1 <= n <= 20:
+            return "1-20"
+        elif 21 <= n <= 40:
+            return "21-40"
+        elif 41 <= n <= 60:
+            return "41-60"
         else:
-            st.error("缺少对应期预测数据，请先生成再核对")
+            return "61-80"
+    
+    zone_list = [get_zone(num) for num in real_nums]
+    if zone_list:
+        main_zone = max(set(zone_list), key=zone_list.count)
+        parse_list.append(f"本期开奖号码主要集中在区间：**{main_zone}**。")
 
-        # 全流派组合核对
-        st.divider()
-        st.subheader(f"【{check_p}期】全流派组合核对(含批量自动生成)")
-        if not all_comb_df.empty and check_p in all_comb_df["期号"].values:
-            now_comb = all_comb_df[all_comb_df["期号"]==check_p]
-            hot = now_comb[now_comb["玩法类型"].str.contains("热号")]
-            cold = now_comb[now_comb["玩法类型"].str.contains("冷号")]
-            batch = now_comb[now_comb["玩法类型"].str.contains("批量自动生成")]
-            t1,t2,t3,t4=st.tabs(["🔥热号","🧊冷号","📦批量生成","📋全汇总"])
+    # 行情偏向解析
+    hot_hit_cnt = len(hit_hot)
+    cold_hit_cnt = len(hit_cold)
+    if hot_hit_cnt > cold_hit_cnt:
+        parse_list.append("✅ 本期行情偏**热号趋势**，热号流派筛选效果更优。")
+    elif cold_hit_cnt > hot_hit_cnt:
+        parse_list.append("✅ 本期行情偏**冷号回补**，冷号流派筛选效果更优。")
+    else:
+        parse_list.append("⚖️ 本期热号/冷号流派表现均衡，无明显偏向。")
+
+    # 输出解析文字
+    for text in parse_list:
+        st.write(text)
+
+    # ====================== 7. 全组合命中明细（完整显示不隐藏） ======================
+    st.divider()
+    st.subheader("📋 全流派组合命中明细（全部显示）")
+    if not all_comb_df.empty:
+        now_comb = all_comb_df[all_comb_df["period"] == check_p]
+        if not now_comb.empty:
+            hot_combs = now_comb[now_comb["玩法类型"].str.contains("热号", na=False)]
+            cold_combs = now_comb[now_comb["玩法类型"].str.contains("冷号", na=False)]
+            batch_combs = now_comb[now_comb["玩法类型"].str.contains("批量", na=False)]
             
-            # 组合展示公共函数
-            def show_comb_tab(df_tab,title):
-                if df_tab.empty:
-                    st.warning(f"{title}暂无数据")
+            # 子标签分类展示
+            t1, t2, t3, t4 = st.tabs(["🔥热号组合","🧊冷号组合","📦批量组合","📋全汇总"])
+
+            # 组合展示通用函数
+            def show_comb_detail(df_data, title):
+                if df_data.empty:
+                    st.warning(f"{title} 暂无组合数据")
                     return
-                detail=[]
-                for _,r in df_tab.iterrows():
-                    nums = [int(x)for x in r["选号号码"].split()]
-                    h=calc_match_rate(nums,real_nums)
-                    detail.append({
-                        "玩法类型":r["玩法类型"],
-                        "方案编号":r["方案编号"],
-                        "选号组合":r["选号号码"],
-                        "命中个数":h["匹配个数"],
-                        "命中率%":h["正确率%"],
-                        "命中号码":"、".join([f"{x:02d}" for x in h["匹配号码"]])
-                    })
-                d=pd.DataFrame(detail)
-                st.dataframe(d,hide_index=True,use_container_width=True)
-                st.success(f"{title}平均命中率：{d['命中率%'].mean():.2f}%")
-            
-            with t1:show_comb_tab(hot,"热号流派")
-            with t2:show_comb_tab(cold,"冷号流派")
-            with t3:show_comb_tab(batch,"批量自动生成")
-            with t4:show_comb_tab(now_comb,"全流派汇总")
+                hit_detail = []
+                for _, row in df_data.iterrows():
+                    try:
+                        comb_nums = [int(x) for x in str(row["选号号码"]).split()]
+                        hit_count = len(set(comb_nums) & real_set)
+                        hit_rate = round(hit_count / len(comb_nums) * 100, 2) if comb_nums else 0.0
+                        hit_detail.append({
+                            "玩法类型": row["玩法类型"],
+                            "方案编号": row["方案编号"],
+                            "选号组合": row["选号号码"],
+                            "命中个数": hit_count,
+                            "命中率(%)": hit_rate
+                        })
+                    except:
+                        continue
+                if hit_detail:
+                    result_df = pd.DataFrame(hit_detail)
+                    st.dataframe(result_df, use_container_width=True, hide_index=True)
+                    avg_rate = round(result_df["命中率(%)"].mean(), 2)
+                    st.success(f"{title} 平均命中率：{avg_rate}%")
+                else:
+                    st.warning(f"{title} 无有效组合数据")
+
+            # 分标签展示
+            with t1:
+                show_comb_detail(hot_combs, "热号流派组合")
+            with t2:
+                show_comb_detail(cold_combs, "冷号流派组合")
+            with t3:
+                show_comb_detail(batch_combs, "批量自动生成组合")
+            with t4:
+                show_comb_detail(now_comb, "全部流派组合")
         else:
-            st.warning("该期无任何组合存档，先执行批量复盘/手动生成")
+            st.warning("该期暂无任何组合存档数据，请先生成组合")
+    else:
+        st.warning("该期暂无任何组合存档数据，请先生成组合")
+
 
     # ========== 子标签5：双流派复盘优化 ==========
     with review_tab:
