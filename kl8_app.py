@@ -1511,7 +1511,7 @@ with tab4:
             cold_save_path = save_select_comb(tar_p, "冷号回补流派-4铁律合规", cold_all_combs)
             st.success(f"✅ 【{tar_p}期】冷号回补流派全部组合已外置存档：{cold_save_path}，永久固定不变")
 
-    # ========== 子标签4：开奖核对中心（最终定稿·修复Series歧义报错） ==========
+    # ========== 子标签4：开奖核对中心（彻底修复KeyError+Series歧义·最终版） ==========
 with check_tab:
     st.header("📊 开奖核对中心｜正式号 vs 预测池 vs 双流派号码")
     st.info("功能：展示本期正式开奖号码 → 对比预测池号码、热号流派号码、冷号流派号码 → 自动对比解析")
@@ -1520,9 +1520,8 @@ with check_tab:
     all_p_list = sorted(df["period"].astype(str).tolist(), reverse=True)
     check_p = st.selectbox("选择需要核对的 N 期", all_p_list, key="final_check")
 
-    # ====================== 1. 加载本期正式开奖号码（修复Series歧义） ======================
+    # ====================== 1. 加载本期正式开奖号码 ======================
     real_nums = []
-    # 修复：用索引判断期号是否存在，杜绝ambiguous报错
     match_idx = df[df["period"] == check_p].index
     if len(match_idx) > 0:
         row = df.loc[match_idx[0]]
@@ -1554,10 +1553,10 @@ with check_tab:
     st.subheader("🔥 热号惯性流派 · 全量筛选号码")
     all_comb_df = load_all_select_comb()
     hot_nums_set = set()
-    # 修复：判断期号存在+非空，杜绝Series歧义
     if not all_comb_df.empty:
+        # 修复：列名是【期号】不是period
         hot_df = all_comb_df[
-            (all_comb_df["period"] == check_p) &
+            (all_comb_df["期号"] == check_p) &
             (all_comb_df["玩法类型"].str.contains("热号", na=False))
         ]
         if not hot_df.empty:
@@ -1576,8 +1575,9 @@ with check_tab:
     st.subheader("🧊 冷号回补流派 · 全量筛选号码")
     cold_nums_set = set()
     if not all_comb_df.empty:
+        # 修复：列名是【期号】不是period
         cold_df = all_comb_df[
-            (all_comb_df["period"] == check_p) &
+            (all_comb_df["期号"] == check_p) &
             (all_comb_df["玩法类型"].str.contains("冷号", na=False))
         ]
         if not cold_df.empty:
@@ -1596,12 +1596,10 @@ with check_tab:
     st.subheader("📈 四者对比命中结果")
     real_set = set(real_nums)
     
-    # 计算各模块命中
     hit_predict = sorted(list(real_set & set(predict_pool_nums)))
     hit_hot = sorted(list(real_set & hot_nums_set))
     hit_cold = sorted(list(real_set & cold_nums_set))
 
-    # 三列展示命中数据
     c1, c2, c3 = st.columns(3)
     with c1:
         st.metric("预测池命中个数", len(hit_predict))
@@ -1619,25 +1617,22 @@ with check_tab:
     parse_list = []
     parse_list.append(f"本期正式开奖共 **{len(real_nums)}** 个号码。")
 
-    # 预测池解析
     if predict_pool_nums:
         parse_list.append(f"预测池共 **{len(predict_pool_nums)}** 个号码，命中 **{len(hit_predict)}** 个。")
     else:
         parse_list.append("预测池暂无数据，无法对比。")
 
-    # 热号流派解析
     if hot_nums:
         parse_list.append(f"热号流派共筛选 **{len(hot_nums)}** 个号码，命中 **{len(hit_hot)}** 个。")
     else:
         parse_list.append("热号流派暂无数据，无法对比。")
 
-    # 冷号流派解析
     if cold_nums:
         parse_list.append(f"冷号流派共筛选 **{len(cold_nums)}** 个号码，命中 **{len(hit_cold)}** 个。")
     else:
         parse_list.append("冷号流派暂无数据，无法对比。")
 
-    # 开奖区间分布解析
+    # 区间解析
     def get_zone(n):
         if 1 <= n <= 20:
             return "1-20"
@@ -1653,7 +1648,7 @@ with check_tab:
         main_zone = max(set(zone_list), key=zone_list.count)
         parse_list.append(f"本期开奖号码主要集中在区间：**{main_zone}**。")
 
-    # 行情偏向解析
+    # 行情偏向
     hot_hit_cnt = len(hit_hot)
     cold_hit_cnt = len(hit_cold)
     if hot_hit_cnt > cold_hit_cnt:
@@ -1663,24 +1658,22 @@ with check_tab:
     else:
         parse_list.append("⚖️ 本期热号/冷号流派表现均衡，无明显偏向。")
 
-    # 输出解析文字
     for text in parse_list:
         st.write(text)
 
-    # ====================== 7. 全组合命中明细（完整显示不隐藏） ======================
+    # ====================== 7. 全组合命中明细 ======================
     st.divider()
     st.subheader("📋 全流派组合命中明细（全部显示）")
     if not all_comb_df.empty:
-        now_comb = all_comb_df[all_comb_df["period"] == check_p]
+        # 修复：列名是【期号】
+        now_comb = all_comb_df[all_comb_df["期号"] == check_p]
         if not now_comb.empty:
             hot_combs = now_comb[now_comb["玩法类型"].str.contains("热号", na=False)]
             cold_combs = now_comb[now_comb["玩法类型"].str.contains("冷号", na=False)]
             batch_combs = now_comb[now_comb["玩法类型"].str.contains("批量", na=False)]
             
-            # 子标签分类展示
             t1, t2, t3, t4 = st.tabs(["🔥热号组合","🧊冷号组合","📦批量组合","📋全汇总"])
 
-            # 组合展示通用函数
             def show_comb_detail(df_data, title):
                 if df_data.empty:
                     st.warning(f"{title} 暂无组合数据")
@@ -1708,7 +1701,6 @@ with check_tab:
                 else:
                     st.warning(f"{title} 无有效组合数据")
 
-            # 分标签展示
             with t1:
                 show_comb_detail(hot_combs, "热号流派组合")
             with t2:
