@@ -1896,7 +1896,7 @@ with tab5:
                                     get_full_analysis_cached.clear()
                                     st.rerun()    
 
-# ========== Tab6 跨期对比与下期预测号码池生成（修复版，100%覆盖需求） ==========
+# ========== Tab6 跨期对比与下期预测号码池生成（零缩进错误·最终版） ==========
 with tab6:
     st.header("🔄 跨期对比与下期预测号码池生成")
     st.info("✅ 需求全覆盖：N与N-1期对比 | 基底随期号变动 | 二级随基底生成 | 三级随二级生成 | 同源近20期相随/跟随数据")
@@ -1905,256 +1905,113 @@ with tab6:
     period_list = df["period"].tolist()
     if not period_list:
         st.error("暂无开奖数据，请先初始化号码库")
-    else:
-        # 1. 选择分析期号N，自动联动所有数据
-        st.subheader("📌 选择分析期号N")
-        select_period_N = st.selectbox("本期期号N", period_list, index=0, key="cross_period_N")
-        st.divider()
+        st.stop()
 
-        # 2. 自动生成N与N-1期对比
-        with st.spinner("正在生成两期对比数据..."):
-            compare_result = get_two_period_compare(df, select_period_N)
-            if "error" in compare_result:
-                st.error(compare_result["error"])
-            else:
-                # 两期对比表格
-                st.subheader(f"📊 {select_period_N}期 VS {compare_result['N_1_period']}期 核心指标对比")
-                compare_table_df = pd.DataFrame(compare_result["compare_table"][1:], columns=compare_result["compare_table"][0])
-                st.dataframe(compare_table_df, hide_index=True, use_container_width=True)
-                
-                # 文字总结
-                st.subheader("📝 两期对比总结")
-                for summary_text in compare_result["summary"]:
-                    st.info(summary_text)
-                
-                # 基底参考号（随期号变动，完全联动）
-                st.divider()
-                st.subheader(f"🔴 本期{select_period_N}期 基底参考号（随选择期号自动变动）")
-                base_nums = compare_result["N_nums"]
-                full_ana_20 = get_full_analysis_cached(df, window=20)
-                num_status_dict = get_num_status(full_ana_20)
-                base_html = " ".join([fmt_num(n, num_status_dict) for n in sorted(base_nums)])
-                st.markdown(base_html, unsafe_allow_html=True)
-
-        # 3. 生成二级相随层、三级跟随层（同源近20期数据）
-        st.divider()
-        if st.button("🚀 生成二级相随层+三级跟随层（基于近20期相随/跟随数据）", use_container_width=True, type="primary"):
-            with st.spinner("严格按层级生成，层间完全隔离..."):
-                # 加载近20期相随号数据（和多周期板块同源）
-                xiang_sui_20 = get_period_xiang_sui_data(df, 20)
-                xiang_sui_dict = xiang_sui_20["xiang_sui_dict"]
-                follow_20 = get_period_follow_data(df, 20)
-                follow_dict = follow_20["follow_dict"]
-
-                # 3.1 生成二级相随层：严格基于基底参考号生成
-                st.divider()
-                st.subheader("🟡 二级相随层（基于基底参考号+近20期相随号数据生成）")
-                level2_result = set()
-                level2_detail = []
-                # 遍历基底每个号码，取近20期Top3相随号
-                for base_num in base_nums:
-                    num_xiang_sui = get_period_xiang_sui_data(df, 20, target_num=base_num)["target_xiang_sui"]
-                    if num_xiang_sui:
-                        top3 = num_xiang_sui[:3]
-                        for sui_num, cnt in top3:
-                            # 严格隔离：不能是基底号码
-                            if sui_num not in base_nums:
-                                level2_result.add(sui_num)
-                                level2_detail.append({
-                                    "基底号码": f"{base_num:02d}",
-                                    "二级相随号": f"{sui_num:02d}",
-                                    "近20期相随次数": cnt,
-                                    "相随概率": f"{round(cnt/20*100, 2)}%"
-                                })
-                # 排序去重
-                level2_sorted = sorted(list(level2_result), key=lambda x: (-num_status_dict[x]["cnt"], x))
-                # 展示明细
-                if level2_detail:
-                    level2_df = pd.DataFrame(level2_detail)
-                    st.dataframe(level2_df, hide_index=True, use_container_width=True)
-                    st.markdown(f"**二级相随号最终池（去重后）**：{' '.join([f'{x:02d}' for x in level2_sorted])}")
-                    st.success(f"✅ 二级相随层生成完成，共{len(level2_sorted)}个唯一号码，与基底无重复")
-                else:
-                    st.warning("暂无有效二级相随号数据")
-
-                # 3.2 生成三级跟随层：严格基于二级相随层生成
-                st.divider()
-                st.subheader("🟢 三级跟随层（基于二级相随层+近20期相随号数据生成）")
-                level3_result = set()
-                level3_detail = []
-                # 遍历二级每个号码，取近20期Top3相随号
-                for level2_num in level2_sorted:
-                    num_xiang_sui = get_period_xiang_sui_data(df, 20, target_num=level2_num)["target_xiang_sui"]
-                    if num_xiang_sui:
-                        top3 = num_xiang_sui[:3]
-                        for sui_num, cnt in top3:
-                            # 严格隔离：不能是基底号码、不能是二级号码
-                            if sui_num not in base_nums and sui_num not in level2_sorted:
-                                level3_result.add(sui_num)
-                                level3_detail.append({
-                                    "二级号码": f"{level2_num:02d}",
-                                    "三级跟随号": f"{sui_num:02d}",
-                                    "近20期相随次数": cnt,
-                                    "相随概率": f"{round(cnt/20*100, 2)}%"
-                                })
-                # 排序去重
-                level3_sorted = sorted(list(level3_result), key=lambda x: (-num_status_dict[x]["cnt"], x))
-                # 展示明细
-                if level3_detail:
-                    level3_df = pd.DataFrame(level3_detail)
-                    st.dataframe(level3_df, hide_index=True, use_container_width=True)
-                    st.markdown(f"**三级跟随号最终池（去重后）**：{' '.join([f'{x:02d}' for x in level3_sorted])}")
-                    # 层间隔离校验
-                    cross_check = len(set(level2_sorted) & set(level3_sorted))
-                    base_cross_check = len(set(base_nums) & set(level3_sorted))
-                    if cross_check == 0 and base_cross_check == 0:
-                        st.success(f"✅ 三级跟随层生成完成，共{len(level3_sorted)}个唯一号码，与基底、二级层完全无重复，层间隔离校验通过")
-                    else:
-                        st.error("❌ 层间存在重复号码，已自动过滤")
-                else:
-                    st.warning("暂无有效三级跟随号数据")
-
-                # 4. 自动存档预测池
-                st.divider()
-                try:# ========== Tab6 跨期对比与下期预测号码池生成（最终修复版·零报错） ==========
-with tab6:
-    st.header("🔄 跨期对比与下期预测号码池生成")
-    st.info("✅ 需求全覆盖：N与N-1期对比 | 基底随期号变动 | 二级随基底生成 | 三级随二级生成 | 同源近20期相随/跟随数据")
+    # 1. 选择分析期号N
+    st.subheader("📌 选择分析期号N")
+    select_period_N = st.selectbox("本期期号N", period_list, index=0, key="cross_period_N")
     st.divider()
 
-    period_list = df["period"].tolist()
-    if not period_list:
-        st.error("暂无开奖数据，请先初始化号码库")
-    else:
-        # 1. 选择分析期号N，自动联动所有数据
-        st.subheader("📌 选择分析期号N")
-        select_period_N = st.selectbox("本期期号N", period_list, index=0, key="cross_period_N")
-        st.divider()
+    # 2. 自动生成N与N-1期对比
+    with st.spinner("正在生成两期对比数据..."):
+        compare_result = get_two_period_compare(df, select_period_N)
+        if "error" in compare_result:
+            st.error(compare_result["error"])
+            st.stop()
 
-        # 2. 自动生成N与N-1期对比（修复：异常直接拦截，不会出现变量未定义）
-        with st.spinner("正在生成两期对比数据..."):
-            compare_result = get_two_period_compare(df, select_period_N)
-            # 修复：对比失败直接提示+停止，不会执行后面代码，杜绝NameError
-            if "error" in compare_result:
-                st.error(compare_result["error"])
-                st.stop()
-            
-            # 对比成功，才定义base_nums，100%不会出现NameError
-            base_nums = compare_result["N_nums"]
-            # 两期对比表格展示
-            st.subheader(f"📊 {select_period_N}期 VS {compare_result['N_1_period']}期 核心指标对比")
-            compare_table_df = pd.DataFrame(compare_result["compare_table"][1:], columns=compare_result["compare_table"][0])
-            st.dataframe(compare_table_df, hide_index=True, use_container_width=True)
-            
-            # 文字总结
-            st.subheader("📝 两期对比总结")
-            for summary_text in compare_result["summary"]:
-                st.info(summary_text)
-            
-            # 基底参考号（随期号变动，完全联动）
+        base_nums = compare_result["N_nums"]
+
+        # 两期对比表格
+        st.subheader(f"📊 {select_period_N}期 VS {compare_result['N_1_period']}期 核心指标对比")
+        compare_table_df = pd.DataFrame(compare_result["compare_table"][1:], columns=compare_result["compare_table"][0])
+        st.dataframe(compare_table_df, hide_index=True, use_container_width=True)
+
+        # 文字总结
+        st.subheader("📝 两期对比总结")
+        for txt in compare_result["summary"]:
+            st.info(txt)
+
+        # 基底号码展示
+        st.divider()
+        st.subheader(f"🔴 本期{select_period_N}期 基底参考号")
+        full_ana_20 = get_full_analysis_cached(df, window=20)
+        num_status_dict = get_num_status(full_ana_20)
+        base_html = " ".join([fmt_num(n, num_status_dict) for n in sorted(base_nums)])
+        st.markdown(base_html, unsafe_allow_html=True)
+
+    # 3. 生成二级、三级号码
+    st.divider()
+    if st.button("🚀 生成二级相随层+三级跟随层", use_container_width=True, type="primary"):
+        with st.spinner("生成中..."):
+            # 二级相随层
             st.divider()
-            st.subheader(f"🔴 本期{select_period_N}期 基底参考号（随选择期号自动变动）")
-            full_ana_20 = get_full_analysis_cached(df, window=20)
-            num_status_dict = get_num_status(full_ana_20)
-            base_html = " ".join([fmt_num(n, num_status_dict) for n in sorted(base_nums)])
-            st.markdown(base_html, unsafe_allow_html=True)
+            st.subheader("🟡 二级相随层")
+            level2_result = set()
+            level2_detail = []
 
-        # 3. 生成二级相随层、三级跟随层（同源近20期数据）
-        st.divider()
-        if st.button("🚀 生成二级相随层+三级跟随层（基于近20期相随/跟随数据）", use_container_width=True, type="primary"):
-            with st.spinner("严格按层级生成，层间完全隔离..."):
-                # 加载近20期相随号数据（和多周期板块同源）
-                xiang_sui_20 = get_period_xiang_sui_data(df, 20)
-                xiang_sui_dict = xiang_sui_20["xiang_sui_dict"]
-                follow_20 = get_period_follow_data(df, 20)
-                follow_dict = follow_20["follow_dict"]
+            for base_num in base_nums:
+                xs = get_period_xiang_sui_data(df, 20, target_num=base_num)["target_xiang_sui"]
+                if xs:
+                    top3 = xs[:3]
+                    for sui_num, cnt in top3:
+                        if sui_num not in base_nums:
+                            level2_result.add(sui_num)
+                            level2_detail.append({
+                                "基底号码": f"{base_num:02d}",
+                                "二级相随号": f"{sui_num:02d}",
+                                "近20期相随次数": cnt,
+                                "概率": f"{round(cnt/20*100,1)}%"
+                            })
 
-                # 3.1 生成二级相随层：严格基于基底参考号生成
-                st.divider()
-                st.subheader("🟡 二级相随层（基于基底参考号+近20期相随号数据生成）")
-                level2_result = set()
-                level2_detail = []
-                # 遍历基底每个号码，取近20期Top3相随号
-                for base_num in base_nums:
-                    num_xiang_sui = get_period_xiang_sui_data(df, 20, target_num=base_num)["target_xiang_sui"]
-                    if num_xiang_sui:
-                        top3 = num_xiang_sui[:3]
-                        for sui_num, cnt in top3:
-                            # 严格隔离：不能是基底号码
-                            if sui_num not in base_nums:
-                                level2_result.add(sui_num)
-                                level2_detail.append({
-                                    "基底号码": f"{base_num:02d}",
-                                    "二级相随号": f"{sui_num:02d}",
-                                    "近20期相随次数": cnt,
-                                    "相随概率": f"{round(cnt/20*100, 2)}%"
-                                })
-                # 排序去重
-                level2_sorted = sorted(list(level2_result), key=lambda x: (-num_status_dict[x]["cnt"], x))
-                # 展示明细
-                if level2_detail:
-                    level2_df = pd.DataFrame(level2_detail)
-                    st.dataframe(level2_df, hide_index=True, use_container_width=True)
-                    st.markdown(f"**二级相随号最终池（去重后）**：{' '.join([f'{x:02d}' for x in level2_sorted])}")
-                    st.success(f"✅ 二级相随层生成完成，共{len(level2_sorted)}个唯一号码，与基底无重复")
-                else:
-                    st.warning("暂无有效二级相随号数据")
+            level2_sorted = sorted(level2_result)
+            if level2_detail:
+                st.dataframe(pd.DataFrame(level2_detail), hide_index=True, use_container_width=True)
+                st.markdown(f"**最终二级池：** {' '.join(f'{x:02d}' for x in level2_sorted)}")
+            else:
+                st.warning("无二级相随号")
 
-                # 3.2 生成三级跟随层：严格基于二级相随层生成
-                st.divider()
-                st.subheader("🟢 三级跟随层（基于二级相随层+近20期相随号数据生成）")
-                level3_result = set()
-                level3_detail = []
-                # 遍历二级每个号码，取近20期Top3相随号
-                for level2_num in level2_sorted:
-                    num_xiang_sui = get_period_xiang_sui_data(df, 20, target_num=level2_num)["target_xiang_sui"]
-                    if num_xiang_sui:
-                        top3 = num_xiang_sui[:3]
-                        for sui_num, cnt in top3:
-                            # 严格隔离：不能是基底号码、不能是二级号码
-                            if sui_num not in base_nums and sui_num not in level2_sorted:
-                                level3_result.add(sui_num)
-                                level3_detail.append({
-                                    "二级号码": f"{level2_num:02d}",
-                                    "三级跟随号": f"{sui_num:02d}",
-                                    "近20期相随次数": cnt,
-                                    "相随概率": f"{round(cnt/20*100, 2)}%"
-                                })
-                # 排序去重
-                level3_sorted = sorted(list(level3_result), key=lambda x: (-num_status_dict[x]["cnt"], x))
-                # 展示明细
-                if level3_detail:
-                    level3_df = pd.DataFrame(level3_detail)
-                    st.dataframe(level3_df, hide_index=True, use_container_width=True)
-                    st.markdown(f"**三级跟随号最终池（去重后）**：{' '.join([f'{x:02d}' for x in level3_sorted])}")
-                    # 层间隔离校验
-                    cross_check = len(set(level2_sorted) & set(level3_sorted))
-                    base_cross_check = len(set(base_nums) & set(level3_sorted))
-                    if cross_check == 0 and base_cross_check == 0:
-                        st.success(f"✅ 三级跟随层生成完成，共{len(level3_sorted)}个唯一号码，与基底、二级层完全无重复，层间隔离校验通过")
-                    else:
-                        st.error("❌ 层间存在重复号码，已自动过滤")
-                else:
-                    st.warning("暂无有效三级跟随号数据")
+            # 三级跟随层
+            st.divider()
+            st.subheader("🟢 三级跟随层")
+            level3_result = set()
+            level3_detail = []
 
-                # 4. 自动存档预测池
-                st.divider()
-                try:
-                    # 自动计算目标预测期号N+1
-                    target_period_num = int(select_period_N) + 1
-                    target_predict_period = str(target_period_num).zfill(7)
-                    save_path = save_predict_num(
-                        target_period=target_predict_period,
-                        data_end_period=select_period_N,
-                        level2_list=level2_sorted,
-                        level3_list=level3_sorted
-                    )
-                    st.success(f"✅ 【{target_predict_period}期】预测池已自动存档，路径：{save_path}")
-                except Exception as e:
-                    st.error(f"预测池存档失败：{str(e)}")
+            for l2_num in level2_sorted:
+                xs = get_period_xiang_sui_data(df, 20, target_num=l2_num)["target_xiang_sui"]
+                if xs:
+                    top3 = xs[:3]
+                    for sui_num, cnt in top3:
+                        if sui_num not in base_nums and sui_num not in level2_sorted:
+                            level3_result.add(sui_num)
+                            level3_detail.append({
+                                "二级号码": f"{l2_num:02d}",
+                                "三级跟随号": f"{sui_num:02d}",
+                                "近20期相随次数": cnt,
+                                "概率": f"{round(cnt/20*100,1)}%"
+                            })
 
-    st.caption("🔒 数据同源说明：二级/三级号码生成完全基于多周期板块近20期相随号数据，保证逻辑一致性")  
+            level3_sorted = sorted(level3_result)
+            if level3_detail:
+                st.dataframe(pd.DataFrame(level3_detail), hide_index=True, use_container_width=True)
+                st.markdown(f"**最终三级池：** {' '.join(f'{x:02d}' for x in level3_sorted)}")
+            else:
+                st.warning("无三级跟随号")
 
+            # 自动存档
+            st.divider()
+            try:
+                target_period = str(int(select_period_N) + 1).zfill(7)
+                save_predict_num(
+                    target_period=target_period,
+                    data_end_period=select_period_N,
+                    level2_list=level2_sorted,
+                    level3_list=level3_sorted
+                )
+                st.success(f"✅ {target_period} 预测池已保存")
+            except Exception as e:
+                st.error(f"存档失败：{e}")
+
+st.caption("🔒 层间完全隔离，同源近20期数据")
 
 # ========== Tab7 设置页（数据管理+备份迁移+自动生成文件删除+系统重置） ==========
 with tab7:
