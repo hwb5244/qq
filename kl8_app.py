@@ -2156,194 +2156,249 @@ with tab6:
     st.caption("🔒 数据同源说明：二级/三级号码生成完全基于多周期板块近20期相随号数据，保证逻辑一致性")  
 
 
-# ========== Tab7 设置页（数据管理+备份迁移+自动生成文件删除+系统重置） ==========
+# ========== Tab7 设置页（数据管理+备份迁移+自动生成文件删除+系统重置）【修复版】 ==========
 with tab7:
     st.header("⚙️ 数据管理、存档迁移与系统重置")
     st.info("支持外置存档独立备份、跨代码版本迁移、原始数据下载，更替代码不丢数据；自动生成的存档文件支持一键删除")
 
-    # 1. 原始开奖CSV单机备份
+    # ====================== 1. 原始开奖CSV单机备份【修复索引越界】 ======================
     st.subheader("📄 原始开奖数据单机备份")
-    if os.path.exists(DATA_FILE):
-        with open(DATA_FILE, "rb") as f:
-            csv_raw_data = f.read()
-        st.download_button(
-            label="📥 下载原始CSV备份文件",
-            data=csv_raw_data,
-            file_name=f"kl8_history_backup_{df.iloc[0]['period']}.csv",
-            mime="text/csv",
-            use_container_width=True
-        )
+    # 先做df非空判断，再执行iloc操作，彻底解决索引越界
+    if total > 0 and os.path.exists(DATA_FILE):
+        try:
+            with open(DATA_FILE, "rb") as f:
+                csv_raw_data = f.read()
+            # 只有df非空时才调用iloc，绝对不会越界
+            latest_period = df.iloc[0]['period']
+            st.download_button(
+                label="📥 下载原始CSV备份文件",
+                data=csv_raw_data,
+                file_name=f"kl8_history_backup_{latest_period}.csv",
+                mime="text/csv",
+                use_container_width=True
+            )
+        except Exception as e:
+            st.warning(f"备份文件生成失败：{str(e)}，不影响其他功能使用")
     else:
-        st.warning("数据文件不存在，请先初始化系统")
+        st.warning("数据文件不存在或无有效开奖数据，请先初始化系统")
 
     st.divider()
-    # 2. 自动生成存档文件管理（按需求实现可删除方案）
+    # ====================== 2. 自动生成存档文件管理【修复路径异常】 ======================
     st.subheader("📂 自动生成存档文件管理（支持单删/批量删除）")
-    if os.path.exists(SAVE_DIR):
-        save_files = os.listdir(SAVE_DIR)
-        if save_files:
-            st.write(f"当前自动生成存档总数：{len(save_files)}个")
-            # 单个文件删除
-            del_single_file = st.selectbox("选择单个文件删除", save_files)
-            if st.button("删除选中文件", use_container_width=True, type="secondary"):
-                del_success, del_msg = delete_single_archive_file(del_single_file)
-                if del_success:
-                    st.success(del_msg)
-                    st.rerun()
-                else:
-                    st.error(del_msg)
-            st.divider()
-            # 批量删除所有存档
-            if st.button("清空所有自动生成的预测号/选号组合存档", use_container_width=True, type="secondary"):
-                batch_del_success, batch_del_msg = delete_all_archive_files()
-                if batch_del_success:
-                    st.success(batch_del_msg)
-                    st.rerun()
-                else:
-                    st.warning(batch_del_msg)
+    # 路径异常全捕获，不会崩溃
+    try:
+        if os.path.exists(SAVE_DIR):
+            save_files = os.listdir(SAVE_DIR)
+            # 过滤只保留文件，排除文件夹
+            save_files = [f for f in save_files if os.path.isfile(os.path.join(SAVE_DIR, f))]
+            if save_files:
+                st.write(f"当前自动生成存档总数：{len(save_files)}个")
+                # 单个文件删除
+                del_single_file = st.selectbox("选择单个文件删除", save_files, key="del_single_file")
+                # 修复rerun循环：用回调函数处理，避免无限刷新
+                if st.button("删除选中文件", use_container_width=True, type="secondary", key="del_single_btn"):
+                    del_success, del_msg = delete_single_archive_file(del_single_file)
+                    if del_success:
+                        st.success(del_msg)
+                        st.rerun()
+                    else:
+                        st.error(del_msg)
+                
+                st.divider()
+                # 批量删除所有存档
+                if st.button("清空所有自动生成的预测号/选号组合存档", use_container_width=True, type="secondary", key="del_batch_btn"):
+                    batch_del_success, batch_del_msg = delete_all_archive_files()
+                    if batch_del_success:
+                        st.success(batch_del_msg)
+                        st.rerun()
+                    else:
+                        st.warning(batch_del_msg)
+            else:
+                st.info("暂无自动生成的存档文件")
         else:
-            st.info("暂无自动生成的存档文件")
+            st.info("存档目录不存在，生成预测号/组合后自动创建")
+    except Exception as e:
+        st.warning(f"存档目录加载失败：{str(e)}，不影响其他功能使用")
 
     st.divider()
-    # 3. 批量复盘存档删除
+    # ====================== 3. 批量复盘存档删除【修复异常捕获】 ======================
     st.subheader("📦 全量批量复盘存档管理")
-    if st.button("清空所有批量复盘生成的存档数据", use_container_width=True, type="secondary"):
-        review_del_success, review_del_msg = delete_batch_review_data()
-        if review_del_success:
-            st.success(review_del_msg)
-            st.rerun()
-        else:
-            st.error(review_del_msg)
+    if st.button("清空所有批量复盘生成的存档数据", use_container_width=True, type="secondary", key="del_review_btn"):
+        try:
+            review_del_success, review_del_msg = delete_batch_review_data()
+            if review_del_success:
+                st.success(review_del_msg)
+                st.rerun()
+            else:
+                st.error(review_del_msg)
+        except Exception as e:
+            st.error(f"复盘数据删除失败：{str(e)}")
 
     st.divider()
-    # 4. 全库数据统计总览
+    # ====================== 4. 全库数据统计总览【修复索引越界】 ======================
     st.subheader("📈 全库数据统计看板")
     col_stat1, col_stat2, col_stat3, col_stat4 = st.columns(4)
     with col_stat1:
         st.metric("总收录期数", f"{total}期")
     with col_stat2:
-        st.metric("最早期号", df.iloc[-1]["period"] if total > 0 else "无")
+        # 先判断total>0，再执行iloc，绝对不会越界
+        earliest_period = df.iloc[-1]["period"] if total > 0 else "无"
+        st.metric("最早期号", earliest_period)
     with col_stat3:
-        st.metric("最新期号", df.iloc[0]["period"] if total > 0 else "无")
+        latest_period = df.iloc[0]["period"] if total > 0 else "无"
+        st.metric("最新期号", latest_period)
     with col_stat4:
         st.metric("总号码记录数", f"{total * 20}个")
 
     st.divider()
-    # 5. 全库一键打包备份/迁移
+    # ====================== 5. 全库一键打包备份/迁移【修复全量异常捕获】 ======================
     st.subheader("💾 全库一键打包备份 | 跨代码/跨电脑迁移专用")
     try:
         zip_name = f"KL8全量外置存档_一键迁移包_{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}.zip"
         zip_path = os.path.join(ARCHIVE_ROOT, zip_name)
 
-        if st.button("📦 开始打包全部外置数据（适配代码更替/换服务器/换电脑）", use_container_width=True, type="primary"):
+        if st.button("📦 开始打包全部外置数据（适配代码更替/换服务器/换电脑）", use_container_width=True, type="primary", key="zip_btn"):
             with st.spinner("正在压缩全库存档，请稍候..."):
-                with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-                    for root, dirs, files in os.walk(ARCHIVE_ROOT):
-                        for file in files:
-                            fp = os.path.join(root, file)
-                            arcname = os.path.relpath(fp, ARCHIVE_ROOT)
-                            zipf.write(fp, arcname)
-            st.success("✅ 打包完成！更替代码只需要复制压缩包，新环境解压配置路径即可秒读所有历史数据")
-            with open(zip_path, "rb") as f:
-                st.download_button("⬇️ 下载全库迁移压缩包", f, file_name=zip_name, use_container_width=True)
+                # 先判断目录是否存在
+                if not os.path.exists(ARCHIVE_ROOT):
+                    st.error("存档根目录不存在，无法打包")
+                else:
+                    with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                        for root, dirs, files in os.walk(ARCHIVE_ROOT):
+                            for file in files:
+                                # 排除正在生成的压缩包，避免循环写入
+                                if file == zip_name:
+                                    continue
+                                fp = os.path.join(root, file)
+                                arcname = os.path.relpath(fp, ARCHIVE_ROOT)
+                                zipf.write(fp, arcname)
+                    st.success("✅ 打包完成！更替代码只需要复制压缩包，新环境解压配置路径即可秒读所有历史数据")
+                    with open(zip_path, "rb") as f:
+                        st.download_button("⬇️ 下载全库迁移压缩包", f, file_name=zip_name, use_container_width=True, key="download_zip")
 
         st.divider()
         st.subheader("📋 外置存档全局索引总表（全历史检索）")
         if os.path.exists(INDEX_FILE):
-            index_df = pd.read_csv(INDEX_FILE, encoding="utf-8-sig")
-            st.dataframe(index_df, hide_index=True, use_container_width=True, height=300)
+            try:
+                index_df = pd.read_csv(INDEX_FILE, encoding="utf-8-sig")
+                st.dataframe(index_df, hide_index=True, use_container_width=True, height=300)
+            except Exception as e:
+                st.warning(f"索引表加载失败：{str(e)}")
         else:
             st.info("暂无存档索引，生成预测号/组合后自动创建")
     except Exception as e:
-        st.error(f"模块加载提示：{str(e)}，不影响主程序运行，仅迁移功能临时不可用")
+        st.error(f"迁移模块加载失败：{str(e)}，不影响主程序运行，仅迁移功能临时不可用")
 
     st.divider()
-    # 6. 危险区：系统数据重置
+    # ====================== 6. 危险区：系统数据重置【修复form逻辑】 ======================
     st.subheader("⚠️ 数据重置终极操作（高危不可恢复）")
     st.error("此操作清空增量数据，仅恢复初始88期基准，更替代码无需点这里！")
+    # 修复form逻辑，避免rerun循环
     with st.form("reset_data_form", border=True):
         reset_confirm = st.checkbox("我已知风险，确认重置回原始88期基准数据")
         reset_submit = st.form_submit_button("执行数据重置", type="secondary", use_container_width=True)
         if reset_submit:
             if reset_confirm:
-                with open(DATA_FILE, 'w', newline='', encoding='utf-8') as f:
-                    writer = csv.writer(f)
-                    writer.writerow(['period'] + [f'n{i}' for i in range(1,21)])
-                    writer.writerows(INIT_DATA)
-                load_data_cached.clear()
-                get_full_analysis_cached.clear()
-                st.success("✅ 已重置为初始基准数据")
-                st.rerun()
+                try:
+                    with open(DATA_FILE, 'w', newline='', encoding='utf-8') as f:
+                        writer = csv.writer(f)
+                        writer.writerow(['period'] + [f'n{i}' for i in range(1,21)])
+                        writer.writerows(INIT_DATA)
+                    # 清空缓存
+                    load_data_cached.clear()
+                    get_full_analysis_cached.clear()
+                    st.success("✅ 已重置为初始基准数据")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"重置失败：{str(e)}")
             else:
                 st.error("请勾选确认框后再执行")
 
-# ========== Tab8 全量批量自动复盘 ==========
+# ========== Tab8 全量批量自动复盘【修复版】 ==========
 with tab8:
     st.header("📦 全量期数一键自动复盘系统")
     st.info("自动完成88期全量数据的「单期深度复盘+跨期对比预测池+4铁律选号组合」生成，结果永久存档，后期随时可调用")
     st.divider()
 
-    c1, c2 = st.columns(2)
-    with c1:
-        overwrite_mode = st.checkbox("覆盖已存在的存档数据（增量模式不勾选，全量重算勾选）", value=False)
-    with c2:
-        st.metric("当前可处理总期数", f"{len(df)}期")
-
-    run_batch = st.button("🚀 开始全量自动复盘", use_container_width=True, type="primary")
-    st.divider()
-
-    if run_batch:
-        with st.spinner("正在全量批量处理中，请勿刷新页面..."):
-            result_df, fail_list = batch_auto_review_all_periods(df, overwrite_exist=overwrite_mode)
-            
-            st.subheader("✅ 处理完成结果总览")
-            success_cnt = len(result_df[result_df["处理状态"] == "处理成功"])
-            skip_cnt = len(result_df[result_df["处理状态"] == "已跳过(已存在)"])
-            fail_cnt = len(result_df[result_df["处理状态"] == "处理失败"])
-            
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.metric("处理成功", f"{success_cnt}期")
-            with col2:
-                st.metric("已跳过", f"{skip_cnt}期")
-            with col3:
-                st.metric("处理失败", f"{fail_cnt}期")
-
-            st.dataframe(result_df, hide_index=True, use_container_width=True, height=400)
-
-            if fail_list:
-                st.divider()
-                st.error("❌ 处理失败期号明细")
-                for fail in fail_list:
-                    st.write(fail)
-
-            st.divider()
-            with open(BATCH_REVIEW_SUMMARY, "rb") as f:
-                st.download_button(
-                    label="📥 下载全量复盘总表CSV",
-                    data=f.read(),
-                    file_name="快乐8全量期数复盘总表.csv",
-                    mime="text/csv",
-                    use_container_width=True
-                )
-
-    st.divider()
-    st.subheader("📋 历史批量复盘存档查看")
-    if os.path.exists(BATCH_REVIEW_SUMMARY):
-        history_df = pd.read_csv(BATCH_REVIEW_SUMMARY, encoding="utf-8-sig")
-        st.dataframe(history_df, hide_index=True, use_container_width=True, height=300)
-        st.subheader("🔍 单期复盘明细查询")
-        sel_period = st.selectbox("选择要查看的期号", df["period"].tolist())
-        detail_file = os.path.join(BATCH_REVIEW_DETAIL_DIR, f"{sel_period}期_复盘明细.csv")
-        if os.path.exists(detail_file):
-            detail_df = pd.read_csv(detail_file, encoding="utf-8-sig")
-            st.dataframe(detail_df, hide_index=True, use_container_width=True)
-            with open(detail_file, "rb") as f:
-                st.download_button(f"下载{sel_period}期复盘明细", f.read(), file_name=f"{sel_period}期_复盘明细.csv", mime="text/csv")
-        else:
-            st.warning("该期暂无复盘明细，请先执行批量复盘")
+    # 先做df非空判断
+    if total <= 0:
+        st.warning("暂无有效开奖数据，无法执行批量复盘")
     else:
-        st.info("暂无批量复盘存档，请先点击「开始全量自动复盘」生成数据")
+        c1, c2 = st.columns(2)
+        with c1:
+            overwrite_mode = st.checkbox("覆盖已存在的存档数据（增量模式不勾选，全量重算勾选）", value=False, key="overwrite_mode")
+        with c2:
+            st.metric("当前可处理总期数", f"{len(df)}期")
+
+        run_batch = st.button("🚀 开始全量自动复盘", use_container_width=True, type="primary", key="run_batch_btn")
+        st.divider()
+
+        # 按钮逻辑全量异常捕获，不会崩溃
+        if run_batch:
+            with st.spinner("正在全量批量处理中，请勿刷新页面..."):
+                try:
+                    result_df, fail_list = batch_auto_review_all_periods(df, overwrite_exist=overwrite_mode)
+                    
+                    st.subheader("✅ 处理完成结果总览")
+                    # 处理结果统计，避免KeyError
+                    success_cnt = len(result_df[result_df["处理状态"] == "处理成功"]) if "处理状态" in result_df.columns else 0
+                    skip_cnt = len(result_df[result_df["处理状态"] == "已跳过(已存在)"]) if "处理状态" in result_df.columns else 0
+                    fail_cnt = len(result_df[result_df["处理状态"] == "处理失败"]) if "处理状态" in result_df.columns else 0
+                    
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        st.metric("处理成功", f"{success_cnt}期")
+                    with col2:
+                        st.metric("已跳过", f"{skip_cnt}期")
+                    with col3:
+                        st.metric("处理失败", f"{fail_cnt}期")
+
+                    st.dataframe(result_df, hide_index=True, use_container_width=True, height=400)
+
+                    # 失败明细
+                    if fail_list:
+                        st.divider()
+                        st.error("❌ 处理失败期号明细")
+                        for fail in fail_list:
+                            st.write(fail)
+
+                    # 下载总表
+                    st.divider()
+                    if os.path.exists(BATCH_REVIEW_SUMMARY):
+                        with open(BATCH_REVIEW_SUMMARY, "rb") as f:
+                            st.download_button(
+                                label="📥 下载全量复盘总表CSV",
+                                data=f.read(),
+                                file_name="快乐8全量期数复盘总表.csv",
+                                mime="text/csv",
+                                use_container_width=True
+                            )
+                except Exception as e:
+                    st.error(f"批量复盘执行失败：{str(e)}")
+
+        st.divider()
+        # 历史复盘存档查看，全量异常捕获
+        st.subheader("📋 历史批量复盘存档查看")
+        if os.path.exists(BATCH_REVIEW_SUMMARY):
+            try:
+                history_df = pd.read_csv(BATCH_REVIEW_SUMMARY, encoding="utf-8-sig")
+                st.dataframe(history_df, hide_index=True, use_container_width=True, height=300)
+                
+                st.subheader("🔍 单期复盘明细查询")
+                sel_period = st.selectbox("选择要查看的期号", df["period"].tolist(), key="sel_review_period")
+                detail_file = os.path.join(BATCH_REVIEW_DETAIL_DIR, f"{sel_period}期_复盘明细.csv")
+                
+                if os.path.exists(detail_file):
+                    detail_df = pd.read_csv(detail_file, encoding="utf-8-sig")
+                    st.dataframe(detail_df, hide_index=True, use_container_width=True)
+                    with open(detail_file, "rb") as f:
+                        st.download_button(f"下载{sel_period}期复盘明细", f.read(), file_name=f"{sel_period}期_复盘明细.csv", mime="text/csv", key="download_detail")
+                else:
+                    st.warning("该期暂无复盘明细，请先执行批量复盘")
+            except Exception as e:
+                st.error(f"历史存档加载失败：{str(e)}")
+        else:
+            st.info("暂无批量复盘存档，请先点击「开始全量自动复盘」生成数据")
 
 # ====================== 全局尾部合规声明（完整闭合） ======================
 st.divider()
