@@ -212,33 +212,43 @@ def validate_numbers(nums):
 # ====================== 存档管理核心工具函数 ======================
 def save_predict_num(period, level2_list, level3_list):
     """
-    优化版：双重去重+仅存二级/三级号码
-    :param period: 期号
+    格式合规终版 | 双向去重+仅存二三层预测号
+    :param period: 期号（字符串/数字）
     :param level2_list: 第二层 二级相随号列表
     :param level3_list: 第三层 三级跟随号列表
-    :return: 存档文件路径
+    :return: 存档文件完整路径
     """
-    # 1. 同层级内部去重，剔除空值/非数字异常值
-    level2_unique = sorted(list(set([int(n) for n in level2_list if str(n).strip().isdigit()])))
-    level3_raw = sorted(list(set([int(n) for n in level3_list if str(n).strip().isdigit()])))
-    
-    # 2. 跨层级去重：三级池剔除已在二级池出现的号码，保证全池无重复
-    level3_unique = [n for n in level3_raw if n not in level2_unique]
-    
-    # 3. 生成存档数据，严格仅存二级+三级去重后的号码
+    # 1. 单层内部去重+非法值清洗（格式规范：生成器表达式括号完全闭合）
+    level2_clean = sorted(list(set(
+        int(n) for n in level2_list
+        if str(n).strip().isdigit() and 1 <= int(n) <= 80
+    )))
+    level3_raw = sorted(list(set(
+        int(n) for n in level3_list
+        if str(n).strip().isdigit() and 1 <= int(n) <= 80
+    )))
+
+    # 2. 跨层级去重：三级池剔除二级已存在号码，全局无重复
+    level3_clean = [num for num in level3_raw if num not in level2_clean]
+
+    # 3. 构造合规数据表（严格仅存二级、三级预测号）
     df_save = pd.DataFrame({
-        "期号": [period] * len(level2_unique + level3_unique),
-        "候选等级": ["二级相随号"] * len(level2_unique) + ["三级跟随号"] * len(level3_unique),
-        "号码": level2_unique + level3_unique
+        "期号": [period] * (len(level2_clean) + len(level3_clean)),
+        "候选等级": ["二级相随号"] * len(level2_clean) + ["三级跟随号"] * len(level3_clean),
+        "号码": level2_clean + level3_clean
     })
-    
-    # 4. 严格按要求命名文件并保存
+
+    # 4. 按要求命名文件，编码兼容全平台
     filename = os.path.join(SAVE_DIR, f"{period}期预测号.csv")
     df_save.to_csv(filename, index=False, encoding="utf-8-sig")
-    
-    # 日志返回，方便前端提示
-    st.caption(f"✅ 预测号存档完成：二级{len(level2_unique)}个 | 三级{len(level3_unique)}个 | 合计去重后{len(df_save)}个唯一号码")
-    return filename  
+
+    # 前端友好提示
+    st.caption(
+        f"✅ 预测号存档完成 | 二级相随号：{len(level2_clean)}个 | "
+        f"三级跟随号：{len(level3_clean)}个 | 去重后合计：{len(df_save)}个唯一号码"
+    )
+    return filename
+
     
 
 def save_select_comb(period, play_type, comb_list):
@@ -647,25 +657,29 @@ def batch_auto_review_all_periods(df, overwrite_exist=False):
             review_df.to_csv(detail_file, index=False, encoding="utf-8-sig")
             review_status = "已完成"
 
-            # 2. 跨期对比+预测号池生成（从第2期开始）+ 双重去重优化
-if idx >= 1:
-    full_analysis = get_full_analysis_cached(df)
-    num_status_dict = get_num_status(full_analysis)
-    # 生成分级预测池
-    pool_result = generate_leveled_pool(
-        current_nums,
-        full_analysis["co_occur_matrix"]["dict"],
-        full_analysis["follow_matrix"]["dict"],
-        num_status_dict
-    )
-    # 严格仅提取第二层、第三层号码，不混入第一层本期开奖号
-    level2_raw = list(pool_result["l2"])
-    level3_raw = list(pool_result["l3"])
-    # 调用优化后的去重存档函数，和Tab6手动生成规则完全统一
-    save_predict_num(period, level2_raw, level3_raw)
-    predict_status = "已完成"
-else:
-    predict_status = "跳过(无上期数据)"
+        # 2. 跨期对比+分层预测号生成｜格式规整+仅存二三层+双向去重同步优化
+            if idx >= 1:
+                full_analysis = get_full_analysis_cached(df)
+                num_status_dict = get_num_status(full_analysis)
+    
+                # 生成原生分级号码池（隔离第一层开奖号，不参与存档）
+                pool_result = generate_leveled_pool(
+                    current_nums,
+                    full_analysis["co_occur_matrix"]["dict"],
+                    full_analysis["follow_matrix"]["dict"],
+                    num_status_dict
+                )
+
+                # 只提取第二层/第三层，剔除第一层原生开奖基底号
+                pure_level2 = list(pool_result["l2"])
+                pure_level3 = list(pool_result["l3"])
+
+                # 调用优化后去重存档函数，统一和Tab6逻辑对齐
+                save_predict_num(period, pure_level2, pure_level3)
+                predict_status = "已完成"
+            else:
+                predict_status = "跳过(无上期数据)"
+
 
             # 3. 4铁律选号组合生成
             if idx >= 3:
@@ -1490,22 +1504,22 @@ with tab6:
         full_analysis = get_full_analysis_cached(df)
         num_status_dict = get_num_status(full_analysis)
 
-        # 3. 生成分级预测池 + 双重去重优化 + 严格仅存二级/三级号码
+        # 3. 生成分级预测池 + 双向去重优化 + 严格仅存二三层号码
         pool_result = generate_leveled_pool(
             current_nums,
             full_analysis["co_occur_matrix"]["dict"],
             full_analysis["follow_matrix"]["dict"],
             num_status_dict
-         )
-        # 严格仅提取第二层、第三层号码，不混入第一层本期开奖号
-        level2_raw = list(pool_result["l2"])
-        level3_raw = list(pool_result["l3"])
-        # 调用优化后的去重存档函数
-        save_file_path = save_predict_num(
-            selected_current_period,
-            level2_raw,
-            level3_raw
-         )
+        )
+
+        # 严格仅提取第二层、第三层号码，彻底隔离第一层本期开奖号
+        pure_level2 = list(pool_result["l2"])
+        pure_level3 = list(pool_result["l3"])
+
+        # 调用格式合规的去重存档函数
+save_file_path = save_predict_num(selected_current_period, pure_level2, pure_level3)
+st.success(f"✅ 预测池已自动存档完成！保存路径：{save_file_path}")
+
 
         # 4. 双期数据可视化对比表
         st.divider()
