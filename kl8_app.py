@@ -1517,8 +1517,8 @@ with tab6:
         pure_level3 = list(pool_result["l3"])
 
         # 调用格式合规的去重存档函数
-save_file_path = save_predict_num(selected_current_period, pure_level2, pure_level3)
-st.success(f"✅ 预测池已自动存档完成！保存路径：{save_file_path}")
+  save_file_path = save_predict_num(selected_current_period, pure_level2, pure_level3)
+  st.success(f"✅ 预测池已自动存档完成！保存路径：{save_file_path}")
 
 
         # 4. 双期数据可视化对比表
