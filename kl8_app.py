@@ -1157,7 +1157,7 @@ with tab4:
                 hot_combs = build_iron_rule_combination(
                     predict_pool=hot_predict_pool,
                     full_candidate_pool=full_candidate_pool,
-                    two_con=two_continuous
+                    two_con=two_continuous,
                     three_con=three_continuous,
                     last_real_nums=last_pre_real,
                     hot12_list=hot10_plain,
