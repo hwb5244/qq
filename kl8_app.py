@@ -783,6 +783,98 @@ def batch_auto_review_all_periods(df, overwrite_exist=False):
     result_df.to_csv(BATCH_REVIEW_SUMMARY, index=False, encoding="utf-8-sig")
     return result_df, fail_list
 
+
+
+# ====================== 补全缺失的3个核心计算函数（解决NameError报错） ======================
+def calc_occur_rate(df, window=10):
+    """
+    计算指定周期内号码出现次数
+    :param df: 开奖数据DataFrame
+    :param window: 统计周期（期数）
+    :return: 号码出现次数字典、周期内每期开奖号码列表
+    """
+    try:
+        data = df.head(window).copy()
+        num_list = [[int(x) for x in row.iloc[1:21].tolist()] for _, row in data.iterrows()]
+        flat_nums = [n for p in num_list for n in p]
+        occur_count = Counter(flat_nums)
+        # 补全1-80所有号码的出现次数，默认0次
+        full_occur = {n: occur_count.get(n, 0) for n in range(1, 81)}
+        return full_occur, num_list
+    except Exception as e:
+        st.error(f"号码出现率计算失败：{str(e)}")
+        return {n:0 for n in range(1,81)}, []
+
+def calc_follow_probability(df, target_nums, min_occur=4, min_rate=0.4):
+    """
+    计算目标号码的高概率跨期相随号
+    :param df: 开奖数据DataFrame
+    :param target_nums: 目标号码列表
+    :param min_occur: 最低出现次数阈值
+    :param min_rate: 最低相随概率阈值
+    :return: 高概率相随号列表
+    """
+    follow_count = defaultdict(int)
+    target_appear_times = 0
+    try:
+        data = df.head(50).copy()
+        num_list = [[int(x) for x in row.iloc[1:21].tolist()] for _, row in data.iterrows()]
+        target_set = set(target_nums)
+        for i in range(1, len(num_list)):
+            pre_nums = set(num_list[i-1])
+            curr_nums = set(num_list[i])
+            if len(pre_nums & target_set) > 0:
+                target_appear_times += 1
+                for n in curr_nums:
+                    follow_count[n] += 1
+        if target_appear_times == 0:
+            return []
+        # 筛选符合阈值的高概率相随号
+        high_prob_follow = [
+            n for n, cnt in follow_count.items()
+            if cnt >= min_occur and (cnt / target_appear_times) >= min_rate
+        ]
+        return high_prob_follow
+    except Exception as e:
+        st.error(f"相随概率计算失败：{str(e)}")
+        return []
+
+def get_under_open_zone(num_list, window=3, max_occur=3):
+    """
+    计算欠开区间及对应号码
+    :param num_list: 每期开奖号码列表
+    :param window: 统计周期（期数）
+    :param max_occur: 欠开判定阈值（周期内出现次数≤该值判定为欠开）
+    :return: 欠开区间号码列表、各区间出现次数字典
+    """
+    zone_occur = {"zone1":0, "zone2":0, "zone3":0, "zone4":0}
+    try:
+        recent_data = num_list[:window]
+        for period_nums in recent_data:
+            for n in period_nums:
+                if 1 <= n <=20: zone_occur["zone1"] +=1
+                elif 21 <= n <=40: zone_occur["zone2"] +=1
+                elif 41 <= n <=60: zone_occur["zone3"] +=1
+                elif 61 <= n <=80: zone_occur["zone4"] +=1
+        # 筛选欠开区间
+        under_zones = [zone for zone, cnt in zone_occur.items() if cnt <= max_occur]
+        zone_num_map = {
+            "zone1": list(range(1,21)),
+            "zone2": list(range(21,41)),
+            "zone3": list(range(41,61)),
+            "zone4": list(range(61,81))
+        }
+        # 合并欠开区间所有号码
+        under_zone_nums = []
+        for z in under_zones:
+            under_zone_nums.extend(zone_num_map[z])
+        return under_zone_nums, zone_occur
+    except Exception as e:
+        st.error(f"欠开区间计算失败：{str(e)}")
+        return [], zone_occur   
+        
+
+
 # ====================== 双流派复盘专用工具函数 ======================
 def calc_trend_hit_rate(trend_df, period_list, df_data):
     hit_records = []
