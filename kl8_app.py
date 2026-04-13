@@ -1136,7 +1136,7 @@ with tab3:
     # 按周期生成Tab内容
     for idx, period_window in enumerate(PERIOD_LIST):
         with period_tab_list[idx]:
-                        st.subheader(f"📈 近{period_window}期 相随号&跟随号全景数据")
+            st.subheader(f"📈 近{period_window}期 相随号&跟随号全景数据")
             # 子Tab分相随号/跟随号
             xiang_sui_tab, gen_sui_tab, num_query_tab = st.tabs(["🔗 跨期相随号(N→N+1)", "📌 同期跟随号(同频出现)", "🔍 单号码精准查询"])
             
