@@ -134,19 +134,7 @@ INIT_DATA = [
 ["2026073",2,3,6,8,9,20,26,27,29,35,52,57,64,67,73,74,75,76,79,80],
 ["2026074",2,5,7,8,11,13,15,16,20,31,32,33,41,43,52,62,70,71,72,73],
 ["2026075",1,4,17,18,21,22,23,24,25,30,41,47,48,50,54,55,56,57,62,78],
-["2026076",6,10,12,14,16,21,24,38,39,40,46,48,52,58,61,69,71,74,75,77],
-["2026077",3,6,19,21,24,32,36,37,44,45,51,55,58,61,62,66,71,73,74,75],
-["2026078",1,6,7,11,15,21,24,27,31,32,34,38,46,49,52,60,67,71,73,74],
-["2026079",4,10,12,23,38,39,41,44,45,50,51,55,57,60,64,66,68,73,75,76],
-["2026080",7,11,14,24,25,27,32,33,34,46,49,52,54,56,59,60,61,66,69,72],
-["2026081",1,2,8,9,11,12,20,32,34,39,42,43,53,54,55,58,59,63,66,77],
-["2026082",2,5,11,16,23,25,26,29,33,39,57,62,64,68,69,74,76,77,79,80],
-["2026083",1,2,7,13,14,18,23,27,28,38,41,48,51,54,63,65,68,71,75,78],
-["2026084",5,8,17,33,34,35,38,42,43,46,49,50,57,59,60,66,71,72,74,80],
-["2026085",1,3,4,11,13,14,26,31,33,38,40,50,56,58,61,63,65,66,69,79],
-["2026086",1,3,5,7,11,15,17,24,28,29,34,39,45,47,53,57,63,66,72,79],
-["2026087",2,5,7,10,14,23,24,32,37,41,42,44,45,46,48,63,64,71,73,76],
-["2026088",8,9,13,14,18,22,25,33,39,40,44,46,49,55,64,66,68,71,77,80]
+
 ]
 # 提取基准期号列表，用于禁止删除校验
 INIT_PERIOD_LIST = [row[0] for row in INIT_DATA]
@@ -873,14 +861,18 @@ def get_period_xiang_sui_data(df, period_window, target_num=None):
 
 def get_two_period_compare(df, period_N):
     """
-    获取N期与N-1期的对比数据+总结
+    修复版：解决period_num不存在报错，获取N期与N-1期的对比数据+总结
     :param df: 全量开奖数据
     :param period_N: 本期期号N
     :return: 对比表格数据、文字总结、N期号码、N-1期号码
     """
     try:
-        # 获取N期和N-1期数据
-        df_sorted = df.sort_values("period_num", ascending=False).reset_index(drop=True)
+        # 修复：临时生成period_num列，不修改原df，彻底解决字段不存在报错
+        df_temp = df.copy()
+        df_temp['period_num'] = df_temp['period'].astype(int)
+        df_sorted = df_temp.sort_values("period_num", ascending=False).reset_index(drop=True)
+        
+        # 定位N期和N-1期数据
         N_idx = df_sorted[df_sorted["period"] == period_N].index[0]
         N_row = df_sorted.iloc[N_idx]
         N_1_row = df_sorted.iloc[N_idx+1] if N_idx+1 < len(df_sorted) else None
@@ -894,7 +886,8 @@ def get_two_period_compare(df, period_N):
         
         # 构造对比表格
         compare_table = []
-        compare_table.append(["统计维度", f"本期{period_N}", f"上期{N_1_row['period'] if N_1_row else '无'}", "变动情况"])
+        N_1_period_name = N_1_row['period'] if N_1_row else '无'
+        compare_table.append(["统计维度", f"本期{period_N}", f"上期{N_1_period_name}", "变动情况"])
         compare_table.append(["奇偶比例", N_structure["oe"], N_1_structure["oe"] if N_1_structure else "-", f"奇数变动{N_structure['odd'] - (N_1_structure['odd'] if N_1_structure else 0)}个"])
         compare_table.append(["大小比例", N_structure["sl"], N_1_structure["sl"] if N_1_structure else "-", f"小号变动{N_structure['small'] - (N_1_structure['small'] if N_1_structure else 0)}个"])
         compare_table.append(["012路比例", N_structure["road"], N_1_structure["road"] if N_1_structure else "-", f"0路变动{N_structure['r0'] - (N_1_structure['r0'] if N_1_structure else 0)}个"])
@@ -932,7 +925,7 @@ def get_two_period_compare(df, period_N):
             "N_structure": N_structure
         }
     except Exception as e:
-        return {"error": f"期号对比失败：{str(e)}"}   
+        return {"error": f"期号对比失败：{str(e)}"}
 
 
 
@@ -1186,8 +1179,228 @@ with tab4:
                 st.dataframe(d,hide_index=True,use_container_width=True)
                 st.success(f"{title}平均命中率：{d['命中率'].mean():.2f}%")
             
-            with t1:show_comb_tab(hot,"热号流派")
-            with t2:show_comb_tab(cold,"冷号流派")
+                    # 子标签2：热号惯性流派（修复版：全组合展示+存档双实现）
+        with hot_flow_tab:
+            st.header("🔥 热号惯性流派｜趋势跟随体系")
+            st.info("底层逻辑：强者恒强，高概率相随号+有效热号双重筛选，适配热号抱团惯性行情 | 生成组合全量展示+自动存档双保障")
+            st.divider()
+            st.warning("🚨 本流派刚性红线：1. 100%剔除三期连开必杀号，两期连开降权号单组最多1个；2. 与截止期开奖号重合率≤20%；3. 预测池优选，优先从预测池选号；4. 组间核心胆码重叠度≤2个")
+            st.divider()
+
+            # 6步选号法执行结果
+            st.subheader("✅ 6步选号法执行结果")
+            step1_base = [n for n in range(1,81) if n not in three_continuous]
+            st.caption(f"步骤1：合规红线过滤，剔除三期连开必杀号，剩余候选池：{len(step1_base)}个")
+            step2_follow = [n for n in high_prob_follow_nums if n in step1_base]
+            st.caption(f"步骤2：提取截止期号码高概率相随号，剩余候选池：{len(step2_follow)}个")
+            step3_hot = []
+            for n in step2_follow:
+                if occur_10.get(n, 0) >=6 and occur_5.get(n, 0) >=1:
+                    step3_hot.append(n)
+            st.caption(f"步骤3：筛选有效热号，剩余候选池：{len(step3_hot)}个")
+            step4_odd = [n for n in step3_hot if n %2 ==1]
+            step4_even = [n for n in step3_hot if n %2 ==0]
+            step4_zone12 = [n for n in step3_hot if 1<=n<=40]
+            step4_zone34 = [n for n in step3_hot if 41<=n<=80]
+            need_odd_cnt = max(round(len(step3_hot)*0.55), len(step4_odd))
+            need_zone12_cnt = max(round(len(step3_hot)*0.5), len(step4_zone12))
+            step4_final = step4_odd[:need_odd_cnt] + step4_even + step4_zone12[:need_zone12_cnt] + step4_zone34
+            step4_final = list(set(step4_final))
+            st.caption(f"步骤4：奇偶/区间适配，剩余候选池：{len(step4_final)}个")
+            step5_core = sorted(step4_final, key=lambda x: (-occur_10.get(x,0), x))[:15]
+            st.caption(f"步骤5：生成15个核心胆码，按热度排序完成")
+            st.markdown(f"**核心胆码池**：{' '.join([f'{x:02d}' for x in step5_core])}")
+            hot_core_pool = set(step5_core)
+
+            st.divider()
+            st.subheader(f"📌 热号惯性流派 【{target_predict_period}期】固化组合生成结果（预测池优选）")
+            # 预测池优先，核心胆码+预测池合并
+            hot_predict_pool = list(set(predict_pool + step5_core))
+            hot_all_combs = []
+            hot_all_display = [] # 新增：用于页面全量展示的列表
+
+            # 循环生成所有玩法组合，同时存档+收集展示数据
+            for cfg in FIX_PLAY_CONFIG:
+                play_name, need_num, fix_group = cfg["玩法名称"], cfg["选号个数"], cfg["固定生成组数"]
+                st.divider()
+                st.subheader(f"📌 {play_name}｜固定{fix_group}组（4铁律校验通过）")
+                
+                # 生成组合
+                hot_combs = build_iron_rule_combination(
+                    predict_pool=hot_predict_pool,
+                    full_candidate_pool=full_candidate_pool,
+                    two_con=two_continuous,
+                    three_con=three_continuous,
+                    last_real_nums=last_pre_real,
+                    hot12_list=hot10_plain,
+                    hot24_list=hot20_plain,
+                    df_back=df_back_plain,
+                    need_cnt=need_num,
+                    group_cnt=fix_group,
+                    seed_key=f"{target_predict_period}_hot_{play_name}",
+                    max_overlap=2
+                )
+                hot_all_combs.extend(hot_combs)
+
+                # 修复：全量展示所有组合，不单单存档
+                if not hot_combs:
+                    st.warning("候选池号码不足，无法生成对应组数组合")
+                else:
+                    # 构造展示用的表格数据
+                    play_display = []
+                    for idx, comb in enumerate(hot_combs, 1):
+                        comb_str = " ".join([f"{n:02d}" for n in comb])
+                        overlap_check = len(set(comb)&set(last_pre_real))/20*100 if len(last_pre_real) > 0 else 0
+                        # 回测命中率（如果目标期已开奖）
+                        hit_res = calc_match_rate(comb, real_check_nums) if real_check_nums else {"匹配个数": "-", "正确率%": "-"}
+                        play_display.append({
+                            "方案编号": f"热号{play_name}方案{idx}",
+                            "选号组合": comb_str,
+                            "与上期重合率": f"{overlap_check:.1f}%",
+                            "合规校验": "✅ 合规" if overlap_check <=20 else "❌ 不合规",
+                            "回测命中个数": hit_res["匹配个数"],
+                            "回测命中率": f"{hit_res['正确率%']}%" if hit_res["正确率%"] != "-" else "-"
+                        })
+                    # 页面展示表格
+                    play_display_df = pd.DataFrame(play_display)
+                    st.dataframe(play_display_df, hide_index=True, use_container_width=True, height=150+len(hot_combs)*35)
+                    # 收集到全量展示列表
+                    hot_all_display.extend(play_display)
+
+            # 全流派组合汇总展示
+            st.divider()
+            st.subheader("📋 热号惯性流派 全玩法组合汇总")
+            if hot_all_display:
+                hot_all_df = pd.DataFrame(hot_all_display)
+                st.dataframe(hot_all_df, hide_index=True, use_container_width=True, height=400)
+            else:
+                st.warning("暂无有效组合生成")
+
+            # 自动存档（保留原有存档功能）
+            if hot_all_combs and target_predict_period:
+                hot_save_path = save_select_comb(target_predict_period, "热号惯性流派-4铁律合规", hot_all_combs)
+                st.success(f"✅ 【{target_predict_period}期】热号惯性流派全部组合已外置存档：{hot_save_path}，永久固定不变")
+
+                    # 子标签3：冷号回补流派（修复版：全组合展示+存档双实现）
+        with cold_back_tab:
+            st.header("🧊 冷号回补流派｜均值回归体系")
+            st.info("底层逻辑：万物皆有均值，欠的总要还，欠开区间全覆盖+有效温冷号筛选，适配冷号集中回补行情 | 生成组合全量展示+自动存档双保障")
+            st.divider()
+            st.warning("🚨 本流派刚性红线：1. 100%剔除三期连开必杀号，两期连开号一律不用；2. 与截止期开奖号重合率≤10%；3. 100%覆盖所有欠开区间；4. 与热号流派核心池重叠度≤1个；5. 预测池优选，优先从预测池选号")
+            st.divider()
+
+            # 6步选号法执行结果
+            st.subheader("✅ 6步选号法执行结果")
+            step1_base = [n for n in range(1,81) if n not in three_continuous and n not in two_continuous]
+            st.caption(f"步骤1：合规红线过滤，剔除三期/两期连开号，剩余候选池：{len(step1_base)}个")
+            step2_under_zone = [n for n in under_zone_nums if n in step1_base]
+            st.caption(f"步骤2：锁定欠开区间全覆盖，剩余候选池：{len(step2_under_zone)}个")
+            miss_dict = full_analysis_all["miss_analysis"]["mi"]
+            step3_warm_cold = []
+            for n in step2_under_zone:
+                occur_10_cnt = occur_10.get(n, 0)
+                miss_cnt = miss_dict.get(n, 0)
+                if 2 <= occur_10_cnt <=5 and miss_cnt <10 and n in high_prob_follow_nums:
+                    step3_warm_cold.append(n)
+            st.caption(f"步骤3：筛选有效温冷号，剩余候选池：{len(step3_warm_cold)}个")
+            step4_odd = [n for n in step3_warm_cold if n %2 ==1]
+            step4_even = [n for n in step3_warm_cold if n %2 ==0]
+            step4_zone12 = [n for n in step3_warm_cold if 1<=n<=40]
+            step4_zone34 = [n for n in step3_warm_cold if 41<=n<=80]
+            need_odd_cnt = max(round(len(step3_warm_cold)*0.55), len(step4_odd))
+            need_zone12_cnt = max(round(len(step3_warm_cold)*0.5), len(step4_zone12))
+            step4_final = step4_odd[:need_odd_cnt] + step4_even + step4_zone12[:need_zone12_cnt] + step4_zone34
+            step4_final = list(set(step4_final))
+            st.caption(f"步骤4：奇偶/区间适配，剩余候选池：{len(step4_final)}个")
+            step5_core = sorted(step4_final, key=lambda x: (-miss_dict.get(x,0), x))[:15]
+            st.caption(f"步骤5：生成15个核心胆码，按欠开幅度排序完成")
+            st.markdown(f"**核心胆码池**：{' '.join([f'{x:02d}' for x in step5_core])}")
+
+            # 流派隔离校验：和热号流派核心池重叠度≤1个
+            try:
+                overlap_with_hot = len(set(step5_core) & hot_core_pool)
+                if overlap_with_hot > MAX_OVERLAP_BETWEEN_TREND:
+                    st.warning(f"⚠️ 流派隔离校验不通过：与热号流派核心池重叠{overlap_with_hot}个，已自动调整")
+                    overlap_nums = set(step5_core) & hot_core_pool
+                    step5_core = [n for n in step5_core if n not in overlap_nums]
+                    backup_nums = sorted(step4_final, key=lambda x: (-miss_dict.get(x,0), x))[15:15+overlap_with_hot]
+                    step5_core.extend(backup_nums)
+                    st.markdown(f"**调整后核心胆码池**：{' '.join([f'{x:02d}' for x in step5_core])}")
+                else:
+                    st.success(f"✅ 流派隔离校验通过：与热号流派核心池重叠{overlap_with_hot}个，符合≤{MAX_OVERLAP_BETWEEN_TREND}个的要求")
+            except Exception:
+                st.info("ℹ️ 热号流派核心池未生成，跳过流派隔离校验")
+
+            # 生成投注组合，4铁律校验，重合率收紧到≤1个
+            st.divider()
+            st.subheader(f"📌 冷号回补流派 【{target_predict_period}期】固化组合生成结果（预测池优选）")
+            # 预测池优先，核心胆码+预测池合并
+            cold_predict_pool = list(set(predict_pool + step5_core))
+            cold_all_combs = []
+            cold_all_display = [] # 新增：用于页面全量展示的列表
+
+            # 循环生成所有玩法组合，同时存档+收集展示数据
+            for cfg in FIX_PLAY_CONFIG:
+                play_name, need_num, fix_group = cfg["玩法名称"], cfg["选号个数"], cfg["固定生成组数"]
+                st.divider()
+                st.subheader(f"📌 {play_name}｜固定{fix_group}组（4铁律校验通过）")
+                
+                # 生成组合
+                cold_combs = build_iron_rule_combination(
+                    predict_pool=cold_predict_pool,
+                    full_candidate_pool=full_candidate_pool,
+                    two_con=two_continuous,
+                    three_con=three_continuous,
+                    last_real_nums=last_pre_real,
+                    hot12_list=hot10_plain,
+                    hot24_list=hot20_plain,
+                    df_back=df_back_plain,
+                    need_cnt=need_num,
+                    group_cnt=fix_group,
+                    seed_key=f"{target_predict_period}_cold_{play_name}",
+                    max_overlap=1
+                )
+                cold_all_combs.extend(cold_combs)
+
+                # 修复：全量展示所有组合，不单单存档
+                if not cold_combs:
+                    st.warning("候选池号码不足，无法生成对应组数组合")
+                else:
+                    # 构造展示用的表格数据
+                    play_display = []
+                    for idx, comb in enumerate(cold_combs, 1):
+                        comb_str = " ".join([f"{n:02d}" for n in comb])
+                        overlap_check = len(set(comb)&set(last_pre_real))/20*100 if len(last_pre_real) > 0 else 0
+                        # 回测命中率（如果目标期已开奖）
+                        hit_res = calc_match_rate(comb, real_check_nums) if real_check_nums else {"匹配个数": "-", "正确率%": "-"}
+                        play_display.append({
+                            "方案编号": f"冷号{play_name}方案{idx}",
+                            "选号组合": comb_str,
+                            "与上期重合率": f"{overlap_check:.1f}%",
+                            "合规校验": "✅ 合规" if overlap_check <=10 else "❌ 不合规",
+                            "回测命中个数": hit_res["匹配个数"],
+                            "回测命中率": f"{hit_res['正确率%']}%" if hit_res["正确率%"] != "-" else "-"
+                        })
+                    # 页面展示表格
+                    play_display_df = pd.DataFrame(play_display)
+                    st.dataframe(play_display_df, hide_index=True, use_container_width=True, height=150+len(cold_combs)*35)
+                    # 收集到全量展示列表
+                    cold_all_display.extend(play_display)
+
+            # 全流派组合汇总展示
+            st.divider()
+            st.subheader("📋 冷号回补流派 全玩法组合汇总")
+            if cold_all_display:
+                cold_all_df = pd.DataFrame(cold_all_display)
+                st.dataframe(cold_all_df, hide_index=True, use_container_width=True, height=400)
+            else:
+                st.warning("暂无有效组合生成")
+
+            # 自动存档（保留原有存档功能）
+            if cold_all_combs and target_predict_period:
+                cold_save_path = save_select_comb(target_predict_period, "冷号回补流派-4铁律合规", cold_all_combs)
+                st.success(f"✅ 【{target_predict_period}期】冷号回补流派全部组合已外置存档：{cold_save_path}，永久固定不变")
+
             with t3:show_comb_tab(batch,"批量自动生成")
             with t4:show_comb_tab(now_comb,"全流派汇总")
         else:
