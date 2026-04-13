@@ -650,7 +650,7 @@ def build_iron_rule_combination(
         pass
     return final_combs
 
-# ====================== 全量批量自动复盘核心函数 ======================
+# ====================== 全量批量自动复盘核心函数（修复版） ======================
 def batch_auto_review_all_periods(df, overwrite_exist=False):
     sort_df = df.sort_values("period", ascending=True).reset_index(drop=True)
     result_list = []
@@ -702,7 +702,7 @@ def batch_auto_review_all_periods(df, overwrite_exist=False):
             review_df.to_csv(detail_file, index=False, encoding="utf-8-sig")
             review_status = "已完成"
 
-            # 2. 跨期对比+分层预测号生成
+            # 2. 跨期对比+分层预测号生成（修复：强制生成预测池，确保后续组合生成有数据源）
             if idx >= 1:
                 full_analysis = get_full_analysis_cached(df)
                 num_status_dict = get_num_status(full_analysis)
@@ -714,30 +714,36 @@ def batch_auto_review_all_periods(df, overwrite_exist=False):
                 )
                 pure_level2 = list(pool_result["l2"])
                 pure_level3 = list(pool_result["l3"])
+                # 强制存档预测号，确保后续能读取到
                 save_predict_num(period, pure_level2, pure_level3)
                 predict_status = "已完成"
             else:
                 predict_status = "跳过(无上期数据)"
 
-            # 3. 4铁律选号组合生成（预测池优选逻辑）
+            # 3. 4铁律选号组合生成（修复：统一周期参数+强制读取预测池+兼容核对模块格式）
             if idx >= 3:
+                # 与Tab4主逻辑统一周期：近10期/近20期
                 his10 = get_full_analysis_cached(df, 10)
                 his20 = get_full_analysis_cached(df, 20)
+                # 连续号计算与Tab4完全一致
                 n1 = set(sort_df.iloc[idx-1].iloc[1:21].tolist())
                 n2 = set(sort_df.iloc[idx-2].iloc[1:21].tolist())
                 n3 = set(sort_df.iloc[idx-3].iloc[1:21].tolist())
                 two_continuous = list(n1 & n2)
                 three_continuous = list(n1 & n2 & n3)
                 last_pre_real = list(n1)
+                # 强制读取已生成的预测池，确保预测池优选逻辑生效
                 pred_df = load_predict_num(period)
                 if pred_df is not None and not pred_df.empty and "号码" in pred_df.columns:
                     l2_only = pred_df[pred_df["候选等级"] == "二级相随号"]["号码"].tolist()
                     l3_only = pred_df[pred_df["候选等级"] == "三级跟随号"]["号码"].tolist()
                     predict_pool = l2_only + l3_only
                     full_candidate_pool = list(range(1,81))
+                    # 热号列表与Tab4统一
                     hot10_plain = [x[0] for x in his10.get("hot_cold", {}).get("hot_top10", [])]
                     hot20_plain = [x[0] for x in his20.get("hot_cold", {}).get("hot_top10", [])]
                     df_back_plain = his20.get("miss_analysis", {}).get("miss_df", pd.DataFrame({"回补率%": [], "号码": []}))
+                    # 固定玩法配置与Tab4完全一致
                     FIX_PLAY_CONFIG = [
                         {"玩法名称":"11码", "选号个数":11, "固定生成组数":3},
                         {"玩法名称":"8码", "选号个数":8,  "固定生成组数":5},
@@ -758,9 +764,10 @@ def batch_auto_review_all_periods(df, overwrite_exist=False):
                             df_back=df_back_plain,
                             need_cnt=need_num,
                             group_cnt=fix_group,
-                            seed_key=f"{period}_{play_name}"
+                            seed_key=f"{period}_batch_{play_name}"
                         )
                         all_combs.extend(combs)
+                    # 修复：存档玩法类型命名，兼容核对模块的筛选逻辑
                     if all_combs:
                         save_select_comb(period, "批量自动生成-4铁律合规", all_combs)
                         comb_status = "已完成"
@@ -791,6 +798,7 @@ def batch_auto_review_all_periods(df, overwrite_exist=False):
     result_df = pd.DataFrame(result_list)
     result_df.to_csv(BATCH_REVIEW_SUMMARY, index=False, encoding="utf-8-sig")
     return result_df, fail_list
+
 
 # ====================== 双流派复盘专用工具函数 ======================
 def calc_trend_hit_rate(trend_df, period_list, df_data):
@@ -1274,10 +1282,10 @@ with tab4:
                 cold_save_path = save_select_comb(target_period, "冷号回补流派-4铁律合规", cold_all_combs)
                 st.success(f"✅ 冷号回补流派全部组合已外置存档：{cold_save_path}，永久固定不变")
 
-        # 子标签4：开奖核对
+                # ====================== 子标签4：开奖核对（修复版：支持批量/热号/冷号全流派核对） ======================
         with check_tab:
             st.header("📊 开奖核对")
-            st.info("一对一核验：当期预测号仅对照当期开奖号，支持双流派组合分开核对")
+            st.info("全流派兼容：支持手动生成的热号/冷号流派、批量复盘自动生成的组合，一对一核验当期开奖号")
             period_list = df["period"].tolist() if len(df) > 0 else []
             if not period_list:
                 st.error("暂无开奖数据！")
@@ -1287,8 +1295,8 @@ with tab4:
                 real_check_nums = df[check_period == df["period"]].iloc[0].iloc[1:21].tolist() if check_period in df["period"].values else []
                 all_comb_df = load_all_select_comb()
 
-                # 预测号核对
-                st.subheader("📊 预测号池核对")
+                # 1. 预测号池核对（修复：兼容批量生成的预测号）
+                st.subheader("📊 预测号池核对（含手动/批量自动生成）")
                 if pred_check_df is not None and not pred_check_df.empty and "号码" in pred_check_df.columns and len(real_check_nums) > 0:
                     pred_list = pred_check_df["号码"].tolist()
                     res = calc_match_rate(pred_list, real_check_nums)
@@ -1302,30 +1310,146 @@ with tab4:
                     st.divider()
                     hit_text = "、".join(f"{x:02d}" for x in res["匹配号码"]) if res["匹配号码"] else "暂无命中号码"
                     st.info(f"命中明细：{hit_text}")
+                    
+                    # 二级/三级预测号分开核对
+                    st.subheader("📋 分层预测号明细核对")
+                    l2_nums = pred_check_df[pred_check_df["候选等级"] == "二级相随号"]["号码"].tolist()
+                    l3_nums = pred_check_df[pred_check_df["候选等级"] == "三级跟随号"]["号码"].tolist()
+                    l2_res = calc_match_rate(l2_nums, real_check_nums)
+                    l3_res = calc_match_rate(l3_nums, real_check_nums)
+                    col_l2, col_l3 = st.columns(2)
+                    with col_l2:
+                        st.metric("二级相随号命中率", f"{l2_res['正确率%']}%", f"命中{l2_res['匹配个数']}个")
+                        st.caption(f"二级号码：{' '.join([f'{x:02d}' for x in l2_nums])}")
+                    with col_l3:
+                        st.metric("三级跟随号命中率", f"{l3_res['正确率%']}%", f"命中{l3_res['匹配个数']}个")
+                        st.caption(f"三级号码：{' '.join([f'{x:02d}' for x in l3_nums])}")
                 else:
-                    st.error("⚠️ 缺少对应期有效预测号/开奖原始数据！")
+                    st.error("⚠️ 缺少对应期有效预测号/开奖原始数据！请先执行跨期预测生成或全量批量复盘")
                 
-                # 双流派组合核对
+                # 2. 选号组合核对（修复：新增批量自动生成组合Tab，全流派兼容）
                 st.divider()
-                st.subheader("📊 双流派组合核对")
+                st.subheader("📊 选号组合全流派核对")
                 if not all_comb_df.empty and check_period in all_comb_df["期号"].values:
                     period_comb_df = all_comb_df[all_comb_df["期号"] == check_period]
+                    # 分流派筛选
                     hot_comb_df = period_comb_df[period_comb_df["玩法类型"].str.contains("热号")]
                     cold_comb_df = period_comb_df[period_comb_df["玩法类型"].str.contains("冷号")]
+                    batch_comb_df = period_comb_df[period_comb_df["玩法类型"].str.contains("批量自动生成")]
                     
-                    tab_hot_check, tab_cold_check = st.tabs(["🔥 热号流派组合核对", "🧊 冷号流派组合核对"])
+                    # 分Tab展示所有流派
+                    tab_hot_check, tab_cold_check, tab_batch_check, tab_all_check = st.tabs([
+                        "🔥 热号流派组合核对", 
+                        "🧊 冷号流派组合核对",
+                        "📦 批量自动生成组合核对",
+                        "📋 全流派组合汇总核对"
+                    ])
+                    
+                    # 热号流派Tab
                     with tab_hot_check:
                         if not hot_comb_df.empty:
-                            st.dataframe(hot_comb_df, hide_index=True, use_container_width=True)
+                            # 计算每组命中率
+                            hot_detail = []
+                            for _, row in hot_comb_df.iterrows():
+                                try:
+                                    c_nums = [int(x) for x in row["选号号码"].split()]
+                                    hit_res = calc_match_rate(c_nums, real_check_nums)
+                                    hot_detail.append({
+                                        "玩法类型": row["玩法类型"],
+                                        "方案编号": row["方案编号"],
+                                        "选号号码": row["选号号码"],
+                                        "命中个数": hit_res["匹配个数"],
+                                        "命中率%": hit_res["正确率%"],
+                                        "命中号码": "、".join([f"{x:02d}" for x in hit_res["匹配号码"]])
+                                    })
+                                except Exception:
+                                    continue
+                            if hot_detail:
+                                hot_detail_df = pd.DataFrame(hot_detail)
+                                st.dataframe(hot_detail_df, hide_index=True, use_container_width=True)
+                                # 流派平均命中率
+                                hot_avg_hit = round(hot_detail_df["命中率%"].mean(), 2)
+                                st.success(f"🔥 热号流派平均命中率：{hot_avg_hit}%")
                         else:
-                            st.warning("该期暂无热号流派组合存档")
+                            st.warning("该期暂无热号流派组合存档，请先手动生成或执行批量复盘")
+                    
+                    # 冷号流派Tab
                     with tab_cold_check:
                         if not cold_comb_df.empty:
-                            st.dataframe(cold_comb_df, hide_index=True, use_container_width=True)
+                            cold_detail = []
+                            for _, row in cold_comb_df.iterrows():
+                                try:
+                                    c_nums = [int(x) for x in row["选号号码"].split()]
+                                    hit_res = calc_match_rate(c_nums, real_check_nums)
+                                    cold_detail.append({
+                                        "玩法类型": row["玩法类型"],
+                                        "方案编号": row["方案编号"],
+                                        "选号号码": row["选号号码"],
+                                        "命中个数": hit_res["匹配个数"],
+                                        "命中率%": hit_res["正确率%"],
+                                        "命中号码": "、".join([f"{x:02d}" for x in hit_res["匹配号码"]])
+                                    })
+                                except Exception:
+                                    continue
+                            if cold_detail:
+                                cold_detail_df = pd.DataFrame(cold_detail)
+                                st.dataframe(cold_detail_df, hide_index=True, use_container_width=True)
+                                cold_avg_hit = round(cold_detail_df["命中率%"].mean(), 2)
+                                st.success(f"🧊 冷号流派平均命中率：{cold_avg_hit}%")
                         else:
-                            st.warning("该期暂无冷号流派组合存档")
+                            st.warning("该期暂无冷号流派组合存档，请先手动生成或执行批量复盘")
+                    
+                    # 批量自动生成Tab（核心修复：新增批量数据展示）
+                    with tab_batch_check:
+                        if not batch_comb_df.empty:
+                            batch_detail = []
+                            for _, row in batch_comb_df.iterrows():
+                                try:
+                                    c_nums = [int(x) for x in row["选号号码"].split()]
+                                    hit_res = calc_match_rate(c_nums, real_check_nums)
+                                    batch_detail.append({
+                                        "玩法类型": row["玩法类型"],
+                                        "方案编号": row["方案编号"],
+                                        "选号号码": row["选号号码"],
+                                        "命中个数": hit_res["匹配个数"],
+                                        "命中率%": hit_res["正确率%"],
+                                        "命中号码": "、".join([f"{x:02d}" for x in hit_res["匹配号码"]])
+                                    })
+                                except Exception:
+                                    continue
+                            if batch_detail:
+                                batch_detail_df = pd.DataFrame(batch_detail)
+                                st.dataframe(batch_detail_df, hide_index=True, use_container_width=True)
+                                batch_avg_hit = round(batch_detail_df["命中率%"].mean(), 2)
+                                st.success(f"📦 批量自动生成组合平均命中率：{batch_avg_hit}%")
+                        else:
+                            st.warning("该期暂无批量自动生成的组合存档，请先执行全量批量复盘，且勾选「覆盖已存在的存档数据」")
+                    
+                    # 全流派汇总Tab
+                    with tab_all_check:
+                        all_detail = []
+                        for _, row in period_comb_df.iterrows():
+                            try:
+                                c_nums = [int(x) for x in row["选号号码"].split()]
+                                hit_res = calc_match_rate(c_nums, real_check_nums)
+                                all_detail.append({
+                                    "玩法类型": row["玩法类型"],
+                                    "方案编号": row["方案编号"],
+                                    "选号号码": row["选号号码"],
+                                    "命中个数": hit_res["匹配个数"],
+                                    "命中率%": hit_res["正确率%"],
+                                    "命中号码": "、".join([f"{x:02d}" for x in hit_res["匹配号码"]])
+                                })
+                            except Exception:
+                                continue
+                        if all_detail:
+                            all_detail_df = pd.DataFrame(all_detail)
+                            st.dataframe(all_detail_df, hide_index=True, use_container_width=True)
+                            all_avg_hit = round(all_detail_df["命中率%"].mean(), 2)
+                            st.success(f"📋 全流派组合平均命中率：{all_avg_hit}%")
                 else:
-                    st.warning("该期暂无选号组合存档")
+                    st.warning("该期暂无任何选号组合存档，请先手动生成选号组合，或执行全量批量复盘")
+
 
         # 子标签5：双流派复盘优化
         with review_tab:
