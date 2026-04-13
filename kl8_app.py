@@ -647,20 +647,25 @@ def batch_auto_review_all_periods(df, overwrite_exist=False):
             review_df.to_csv(detail_file, index=False, encoding="utf-8-sig")
             review_status = "已完成"
 
-            # 2. 跨期对比+预测号池生成
-            if idx >= 1:
-                full_analysis = get_full_analysis_cached(df)
-                num_status_dict = get_num_status(full_analysis)
-                pool_result = generate_leveled_pool(
-                    current_nums,
-                    full_analysis["co_occur_matrix"]["dict"],
-                    full_analysis["follow_matrix"]["dict"],
-                    num_status_dict
-                )
-                save_predict_num(period, list(pool_result["l2"]), list(pool_result["l3"]))
-                predict_status = "已完成"
-            else:
-                predict_status = "跳过(无上期数据)"
+            # 2. 跨期对比+预测号池生成（从第2期开始）+ 双重去重优化
+if idx >= 1:
+    full_analysis = get_full_analysis_cached(df)
+    num_status_dict = get_num_status(full_analysis)
+    # 生成分级预测池
+    pool_result = generate_leveled_pool(
+        current_nums,
+        full_analysis["co_occur_matrix"]["dict"],
+        full_analysis["follow_matrix"]["dict"],
+        num_status_dict
+    )
+    # 严格仅提取第二层、第三层号码，不混入第一层本期开奖号
+    level2_raw = list(pool_result["l2"])
+    level3_raw = list(pool_result["l3"])
+    # 调用优化后的去重存档函数，和Tab6手动生成规则完全统一
+    save_predict_num(period, level2_raw, level3_raw)
+    predict_status = "已完成"
+else:
+    predict_status = "跳过(无上期数据)"
 
             # 3. 4铁律选号组合生成
             if idx >= 3:
