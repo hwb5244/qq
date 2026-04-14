@@ -6,6 +6,8 @@ from collections import Counter, defaultdict
 import os
 import csv
 import datetime
+import shutil
+import zipfile
 
 # ====================== 页面基础配置（必须首行执行） ======================
 st.set_page_config(
@@ -17,10 +19,13 @@ st.set_page_config(
 
 # ====================== 全局常量定义（统一管理无硬编码） ======================
 DATA_FILE = "kl8_history_data.csv"
-SAVE_DIR = "lottery_save"  # 存档总目录：存放预测号/选号组合
-# 初始化存档文件夹，避免首次运行报错
-if not os.path.exists(SAVE_DIR):
-    os.makedirs(SAVE_DIR)
+SAVE_DIR = "lottery_save"      # 预测号/选号组合存档
+ARCHIVE_ROOT = "lottery_archive"  # 全局备份根目录 ✅【修复：新增缺失变量】
+INDEX_FILE = os.path.join(ARCHIVE_ROOT, "global_archive_index.csv") # 全局索引 ✅【修复：新增缺失变量】
+# 初始化所有文件夹，避免首次运行报错
+for dir_path in [SAVE_DIR, ARCHIVE_ROOT]:
+    if not os.path.exists(dir_path):
+        os.makedirs(dir_path)
 
 # 1-80质数固定列表
 PRIME_NUMBERS = [2,3,5,7,11,13,17,19,23,29,31,37,41,43,47,53,59,61,67,71,73,79]
@@ -211,7 +216,7 @@ def save_new_data(period, numbers):
 
 def delete_period_data(period, df):
     new_df = df[df['period'] != period].reset_index(drop=True)
-    new_df.to_csv(DATA_FILE, index=False, encoding='utf-8')
+    new_df.to_csv(DATA_FILE, index=False, encoding='utf-8-sig')
     return new_df
 
 def validate_period_unique(period, df):
@@ -234,7 +239,7 @@ def validate_numbers(nums):
     except ValueError:
         return False, "格式错误仅支持数字"
 
-# ====================== 底层模块2：数据分析引擎【重点修复：if粘连/三元表达式语法】 ======================
+# ====================== 底层模块2：数据分析引擎 ======================
 def analyze_full_data(df, window=None):
     data = df.head(window).copy() if window else df.copy()
     num_list = [[int(x) for x in row.iloc[1:21].tolist()] for _, row in data.iterrows()]
@@ -314,7 +319,6 @@ def calc_follow(num_list):
         "top10": sorted(fd.items(), key=lambda x: x[1], reverse=True)[:10]
     }
 
-# 修复点：移除or极简写法，标准if判断；if后补空格，根除SyntaxError
 def calc_road(flat):
     r0 = sum(1 for n in flat if n % 3 == 0)
     r1 = sum(1 for n in flat if n % 3 == 1)
@@ -329,7 +333,6 @@ def calc_road(flat):
         "r2r": f"{r2/t*100:.1f}%"
     }
 
-# 致命修复点：if 数字之间补空格，解决你 Line295 核心报错
 def calc_zone(flat):
     z1 = sum(1 for n in flat if 1 <= n <= 20)
     z2 = sum(1 for n in flat if 21 <= n <= 40)
@@ -346,7 +349,6 @@ def calc_zone(flat):
         "z4r": f"{z4/t*100:.1f}%"
     }
 
-# 致命修复点：三元表达式全部补空格，解决你 Line317 核心报错
 def calc_con(num_list):
     clist = []
     for ns in num_list:
@@ -361,7 +363,7 @@ def calc_con(num_list):
         "min": min(clist) if clist else 0
     }
 
-# ====================== 同源核心函数+预测生成+格式化（修复np.int64/语法挤压） ======================
+# ====================== 同源核心函数+预测生成+格式化 ======================
 def calc_number_structure(numbers, prev_numbers=None):
     numbers = [int(n) for n in numbers]
     if prev_numbers is not None:
@@ -408,44 +410,32 @@ def generate_deep_review(nums, prev_nums=None, period="未知"):
     s = calc_number_structure(nums, prev_nums)
     return {"period": period, **s}
 
-# ========== 彻底修复后的底层generate_leveled_pool函数（根除416行解构报错） ==========
 def generate_leveled_pool(l1_nums, co_occur_dict, follow_dict, num_status_dict):
-    """
-    修复点：
-    1. 加二元元组解构容错，非元组/长度不对直接跳过，不报错
-    2. 加全链路异常捕获，空字典/格式不对直接返回空池，不崩溃
-    3. 保留原有二三级池生成逻辑，功能丝毫不改
-    """
     l1 = set(l1_nums)
     l2_result = set()
     l3_result = set()
     l2_group = []
     l3_group = []
 
-    # 修复1：二级相随号生成，加解构容错
     try:
         co_dict = co_occur_dict if isinstance(co_occur_dict, dict) else {}
         for n in l1:
             valid_list = []
             for k, c in co_dict.items():
-                # 核心修复：先判断键是不是长度为2的元组，不是直接跳过
                 if not isinstance(k, tuple) or len(k) != 2:
                     continue
                 a, b = k
                 if (a == n and b not in l1) or (b == n and a not in l1):
                     match_num = b if a == n else a
                     valid_list.append((a, b, c, match_num))
-            # 排序取前3
             valid_list_sorted = sorted(valid_list, key=lambda x: x[2], reverse=True)[:3]
             for item in valid_list_sorted:
                 a, b, c, match_num = item
                 l2_result.add(match_num)
                 l2_group.append((c, [match_num]))
     except Exception:
-        # 异常兜底，不崩溃
         pass
 
-    # 修复2：三级跟随号生成，加同样解构容错
     try:
         follow_dict_valid = follow_dict if isinstance(follow_dict, dict) else {}
         for n in l2_result:
@@ -463,10 +453,8 @@ def generate_leveled_pool(l1_nums, co_occur_dict, follow_dict, num_status_dict):
                 l3_result.add(match_num)
                 l3_group.append((c, [match_num]))
     except Exception:
-        # 异常兜底
         pass
 
-    # 标准化返回格式，和原有逻辑完全兼容
     return {
         "l1": list(l1),
         "l2": list(l2_result),
@@ -600,15 +588,13 @@ with tab3:
         st.subheader("遗漏值全表")
         st.dataframe(fd['miss_analysis']['miss_df'], use_container_width=True, height=400)
 
-
-# ========== Tab4 全容错终极版（根治627行取值报错+4条铁律+固定组数+固化组合） ==========
+# ========== Tab4 全容错终极版 ==========
 with tab4:
     st.header("🔮 多玩法选号｜4铁律风控固化组合")
     st.error("强制规则：弃前三期连出 | 降两期连出权重 | 与上期重合率≤20% | 仅用二三级候选池")
     st.warning("⚠️ 仅历史数据推演娱乐，组合固化不随刷新变动，不构成购彩建议！")
     gen_tab, check_tab, review_tab = st.tabs(["🎯 合规固化组合生成","📊 同期限预测号VS开奖核对","💡 历史复盘迭代优化"])
 
-    # 固定组数配置，严格匹配要求
     FIX_PLAY_CONFIG = [
         {"玩法名称":"11码", "选号个数":11, "固定生成组数":3},
         {"玩法名称":"8码", "选号个数":8,  "固定生成组数":5},
@@ -616,7 +602,6 @@ with tab4:
         {"玩法名称":"3码", "选号个数":3,  "固定生成组数":10}
     ]
 
-    # 连出号码提取函数，加边界容错
     def get_recent_continuous_no(df_target, curr_period):
         try:
             sort_df = df_target.sort_values("period", ascending=False).reset_index(drop=True)
@@ -632,22 +617,17 @@ with tab4:
         except Exception:
             return [], [], []
 
-    # 固化组合生成函数，加全容错+永久缓存
     @st.cache_data(ttl=0)
     def build_iron_rule_combination(l2_pool, l3_pool, two_con, three_con, last_real_nums, hot12_list, hot24_list, df_back, need_cnt, group_cnt, seed_key):
         try:
-            # 规则4：仅使用二级+三级候选池
             candidate_pool = list(set(l2_pool + l3_pool))
-            # 规则1：强制剔除前三期连续开出号码
             candidate_pool = [n for n in candidate_pool if n not in three_con]
             if len(candidate_pool) < need_cnt:
                 return []
 
-            # 修复：百分比字符串转数字，加容错
             df_back["temp_num"] = df_back["回补率%"].astype(str).str.replace("%", "").astype(float)
             high_back = set(df_back[df_back["temp_num"] >= 80]["号码"].tolist())
 
-            # 权重计算，规则2：前两期连出号码大幅降权
             score_dict = {}
             hot12 = set(hot12_list)
             hot24 = set(hot24_list)
@@ -659,12 +639,10 @@ with tab4:
                 if n in two_con: base_score -= 50
                 score_dict[n] = base_score
 
-            # 无随机固定排序，永久不变
             sort_nums = sorted(candidate_pool, key=lambda x: (-score_dict[x], x))
             final_combs = []
             idx = 0
             max_try = 200
-            # 规则3：与上期重合率≤20%校验
             while len(final_combs) < group_cnt and idx < max_try and idx + need_cnt <= len(sort_nums):
                 temp_comb = sort_nums[idx:idx+need_cnt]
                 overlap = set(temp_comb) & set(last_real_nums)
@@ -676,7 +654,6 @@ with tab4:
         except Exception:
             return []
 
-    # ====================== 子标签1：合规固化组合生成 ======================
     with gen_tab:
         st.info("基于12/24期复盘数据，4铁律过滤后生成永久固化组合，刷新不变化")
         period_list = df["period"].tolist() if len(df) > 0 else []
@@ -684,22 +661,18 @@ with tab4:
             st.error("暂无开奖数据，请先初始化号码库！")
         else:
             target_period = st.selectbox("选择绑定预测期号", period_list)
-            # 加载预测号，加全容错（根治627行报错核心）
             pred_df_target = load_predict_num(target_period)
-            # 核心修复：先判断DataFrame非空+「号码」列存在，再取值，否则兜底
             if pred_df_target is not None and not pred_df_target.empty and "号码" in pred_df_target.columns:
                 all_pred_nums = pred_df_target["号码"].tolist()
             else:
                 all_pred_nums = []
                 st.warning("⚠️ 未找到有效预测号，请先在跨期对比模块生成并保存！")
 
-            # 加载全量分析数据，加容错
             full_analysis_tmp = get_full_analysis_cached(df)
             num_status_dict = get_num_status(full_analysis_tmp)
             current_idx = df[df["period"] == target_period].index[0]
             current_nums_base = [int(x) for x in df.iloc[current_idx].iloc[1:21].tolist()]
 
-            # 生成二三级候选池，底层已修复，不会报错
             pool_all = generate_leveled_pool(
                 current_nums_base, 
                 full_analysis_tmp.get("co_occur_matrix", {}), 
@@ -708,23 +681,19 @@ with tab4:
             )
             l2_only = list(pool_all["l2"])
             l3_only = list(pool_all["l3"])
-            # 兜底：如果池为空，用预测号填充
             if len(l2_only + l3_only) == 0 and len(all_pred_nums) > 0:
                 l2_only = all_pred_nums[:10]
                 l3_only = all_pred_nums[10:]
 
-            # 提取连出黑名单
             two_continuous, three_continuous, last_pre_real = get_recent_continuous_no(df, target_period)
             st.warning(f"🔴 强制排除-前三期连出黑名单：{'、'.join(map(str,three_continuous)) if three_continuous else '无'}")
             st.info(f"🟡 权重降级-前两期连出降权号：{'、'.join(map(str,two_continuous)) if two_continuous else '无'}")
             st.success(f"🟢 合规候选池：二级{len(l2_only)}个 + 三级{len(l3_only)}个")
 
-            # 生成固定组数组合
             if len(l2_only + l3_only) >= 3:
                 his12 = get_full_analysis_cached(df, 12)
                 his24 = get_full_analysis_cached(df, 24)
                 all_save_combs = []
-                # 提前拆解基础数据，不传入复杂字典到缓存
                 hot12_plain = [x[0] for x in his12["hot_cold"]["hot_top10"]] if "hot_cold" in his12 else []
                 hot24_plain = [x[0] for x in his24["hot_cold"]["hot_top10"]] if "hot_cold" in his24 else []
                 df_back_plain = his24["miss_analysis"]["miss_df"].copy() if "miss_analysis" in his24 else pd.DataFrame({"回补率%": [], "号码": []})
@@ -754,16 +723,13 @@ with tab4:
                         for idx, comb in enumerate(iron_combs, 1):
                             comb_html = " ".join([fmt_num(n, num_status_dict) for n in comb])
                             st.markdown(f"**{play_name}方案{idx}**：{comb_html}", unsafe_allow_html=True)
-                            # 校验指标展示
                             overlap_check = len(set(comb)&set(last_pre_real))/20*100 if len(last_pre_real) > 0 else 0
                             hit_res = calc_match_rate(comb, real_check)
                             st.caption(f"重合率{overlap_check:.1f}%≤20%合规 | 当期命中{hit_res['匹配个数']}个 | 命中率{hit_res['正确率%']}%")
-                # 自动存档
                 if all_save_combs:
                     save_path = save_select_comb(target_period, "铁律合规全玩法", all_save_combs)
                     st.success(f"✅ 全部合规组合已外置存档：{save_path}，永久固定不变")
 
-    # ====================== 子标签2：同期限预测号VS开奖核对 ======================
     with check_tab:
         st.info("一对一核验：当期预测号仅对照当期开奖号，数据精准无交叉")
         period_list = df["period"].tolist() if len(df) > 0 else []
@@ -790,7 +756,6 @@ with tab4:
             else:
                 st.error("⚠️ 缺少对应期有效预测号/开奖原始数据！")
 
-    # ====================== 子标签3：历史复盘迭代优化 ======================
     with review_tab:
         st.info("基于合规组合历史命中率复盘，迭代下期选号调整策略")
         all_history_comb = load_all_select_comb()
@@ -823,12 +788,10 @@ with tab4:
 5. 叠加12/24期冷热复盘数据二次加权，稳中提质
 """)
 
-
-# ========== Tab5 单期深度复盘【彻底修复空白+全量渲染+数据唯一性保障】 ==========
+# ========== Tab5 单期深度复盘 ==========
 with tab5:
     st.header("📝 单期深度复盘")
     st.info("支持历史期号一键复盘/手动录入，同源固定逻辑计算，历史数据不变则复盘结果永久唯一不变动")
-    # 复盘模式选择
     review_mode = st.radio("选择复盘方式", ["选择历史期号", "手动录入新期号码"], horizontal=True)
 
     if review_mode == "选择历史期号":
@@ -836,12 +799,10 @@ with tab5:
         selected_period = st.selectbox("选择要复盘的期号", period_list)
         
         if st.button("生成深度复盘报告", use_container_width=True, type="primary"):
-            # 读取当期&上期原始数据（只读不修改，保障数据唯一性）
             current_row = df[df["period"] == selected_period].iloc[0]
             current_nums = [int(x) for x in current_row.iloc[1:21].tolist()]
             current_idx = df[df["period"] == selected_period].index[0]
             
-            # 边界兼容：无下期数据时置空不报错
             prev_nums = None
             prev_period = None
             if current_idx < len(df) - 1:
@@ -849,18 +810,14 @@ with tab5:
                 prev_nums = [int(x) for x in prev_row.iloc[1:21].tolist()]
                 prev_period = prev_row["period"]
 
-            # 调用固定同源核心函数（逻辑固化不动，结果唯一不变）
             review_result = generate_deep_review(current_nums, prev_nums, selected_period)
             full_analysis = get_full_analysis_cached(df)
             num_status_dict = get_num_status(full_analysis)
 
-            # ====================== 核心新增：全量格式化渲染（解决空白关键） ======================
-            # 清洗转换，根除np.int64显示异常
             con_show = "、".join(review_result["con"]) if review_result["con"] else "无"
             repeat_show = "、".join([f"{x:02d}" for x in review_result["repeat"]]) if review_result["repeat"] else "无"
             oblique_show = "、".join([f"{x:02d}" for x in review_result["oblique"]]) if review_result["oblique"] else "无"
             
-            # 同尾号格式化拼接
             tail_format_list = []
             for tail_key, tail_nums in review_result["tail"].items():
                 clean_tail = int(tail_key)
@@ -868,7 +825,6 @@ with tab5:
                 tail_format_list.append(f"尾{clean_tail}：{clean_nums}")
             tail_show = " | ".join(tail_format_list) if tail_format_list else "无"
 
-            # 页面正式渲染输出
             st.divider()
             st.subheader(f"✅ {selected_period}期 深度复盘报告（结果固定唯一）")
             st.markdown("### 一、本期开奖号码（冷热色标区分）")
@@ -896,7 +852,6 @@ with tab5:
             st.caption("💡 说明：底层历史数据/计算逻辑未改动时，该复盘结果永远一致，无随机变动")
 
     else:
-        # 手动录入模式 补全渲染逻辑（同样修复空白）
         with st.form("manual_review_form", border=True):
             manual_period = st.text_input("期号（如：2026089）", placeholder="例：2026089")
             manual_nums = st.text_input("开奖号码（20个数字，空格分隔）", placeholder="例：08 09 13 14 ... 80")
@@ -915,7 +870,6 @@ with tab5:
                         full_analysis = get_full_analysis_cached(df)
                         num_status_dict = get_num_status(full_analysis)
 
-                        # 格式化+渲染输出
                         con_show = "、".join(review_result["con"]) if review_result["con"] else "无"
                         repeat_show = "、".join([f"{x:02d}" for x in review_result["repeat"]]) if review_result["repeat"] else "无"
                         oblique_show = "、".join([f"{x:02d}" for x in review_result["oblique"]]) if review_result["oblique"] else "无"
@@ -948,7 +902,6 @@ with tab5:
                         st.markdown(f"- 同尾组合：{tail_show}（{review_result['tail_cnt']}组）")
                         st.markdown(f"- 斜连关联号：{oblique_show}（{review_result['oblique_cnt']}个）")
 
-                        # 一键保存入口保留
                         if manual_period not in df["period"].values:
                             if st.button("✅ 一键保存到号码库", type="primary", use_container_width=True):
                                 save_success = save_new_data(manual_period, num_msg)
@@ -957,16 +910,15 @@ with tab5:
                                     load_data_cached.clear()
                                     get_full_analysis_cached.clear()
                                     st.rerun() 
-# ========== Tab6 跨期对比与预测号码池【修复空白+同源对齐+对比结论+优化展示+自动存档】 ==========
+
+# ========== Tab6 跨期对比与预测号码池 ✅【修复：删除不存在的键】 ==========
 with tab6:
     st.header("🔄 跨期对比与预测号码池")
     st.info("数据与单期复盘同源统一 | 两期自动对比生成结论 | 分层预测池美化展示 | 生成即刻自动存档")
-    # 下拉选择本期分析期号，自动匹配上期
     period_list = df["period"].tolist()
     selected_current_period = st.selectbox("选择【本期】分析期号(系统自动加载上期联动对比)", period_list)
 
     if st.button("🚀 生成跨期对比+优化预测池+自动存档", use_container_width=True, type="primary"):
-        # ---------------------- 1. 读取本期/上期原始数据（边界防错） ----------------------
         current_idx = df[df["period"] == selected_current_period].index[0]
         current_row = df.iloc[current_idx]
         current_nums = [int(x) for x in current_row.iloc[1:21].tolist()]
@@ -978,20 +930,17 @@ with tab6:
             prev_nums = [int(x) for x in prev_row.iloc[1:21].tolist()]
             prev_period = prev_row["period"]
 
-        # ---------------------- 2. 同源函数计算(和单期复盘完全一致，数据无偏差) ----------------------
         prev_review = generate_deep_review(prev_nums, None, prev_period) if prev_nums else None
         curr_review = generate_deep_review(current_nums, prev_nums, selected_current_period)
         full_analysis = get_full_analysis_cached(df)
         num_status_dict = get_num_status(full_analysis)
 
-        # ---------------------- 3. 生成分级预测池 + 核心自动存档(xxx期预测号.csv) ----------------------
         pool_result = generate_leveled_pool(
             current_nums,
             full_analysis["co_occur_matrix"]["dict"],
             full_analysis["follow_matrix"]["dict"],
             num_status_dict
         )
-        # 执行自动存档并返回路径，弹窗提示
         save_file_path = save_predict_num(
             selected_current_period,
             list(pool_result["l2"]),
@@ -999,7 +948,6 @@ with tab6:
         )
         st.success(f"✅ 预测池已自动存档完成！保存路径：{save_file_path}")
 
-        # ---------------------- 4. 双期数据可视化对比表(同源字段对齐) ----------------------
         st.divider()
         st.subheader("📊 上期VS本期 核心指标同源对比表")
         if prev_review:
@@ -1015,11 +963,9 @@ with tab6:
             ], columns=["统计维度", f"上期{prev_period}", f"本期{selected_current_period}"])
             st.dataframe(compare_df, hide_index=True, use_container_width=True)
 
-        # ---------------------- 5. 智能自动生成两期对比结论(核心新增) ----------------------
         st.divider()
         st.subheader("📝 两期数据深度对比结论报告")
         conclusion_text = []
-        # 奇偶结论
         curr_odd, curr_even = curr_review["odd"], curr_review["even"]
         if curr_odd > curr_even:
             conclusion_text.append("① 本期奇数热开，奇偶偏向奇数侧，偏离理论10:10均衡值；")
@@ -1028,7 +974,6 @@ with tab6:
         else:
             conclusion_text.append("① 本期奇偶完全均衡，贴合历史理论标准配比；")
         
-        # 大小结论
         curr_small, curr_large = curr_review["small"], curr_review["large"]
         if curr_small > curr_large:
             conclusion_text.append("② 小号区(1-40)出号强势，大号区走冷回调；")
@@ -1037,26 +982,19 @@ with tab6:
         else:
             conclusion_text.append("② 大小号配比均衡，四区分布无极端偏移；")
         
-        # 重号&连号结论
         conclusion_text.append(f"③ 本期相对上期重号共{curr_review['repeat_cnt']}个，属于历史正常波动区间；")
         conclusion_text.append(f"④ 本期连号组数{curr_review['con_cnt']}组，{'连号爆发' if curr_review['con_cnt']>4 else '连号平稳'}；")
         
-        # 批量渲染结论
         for text in conclusion_text:
             st.info(text)
 
-        # ---------------------- 6. 预测号码池UI重度优化(分层级+冷热色标+排版美化) ----------------------
         st.divider()
         st.subheader("🎯 下一期分层预测号码池（冷热色标区分 | 已自动存档）")
-        co_map = pool_result["co"]
-        follow_map = pool_result["follow"]
 
-        # 层级1：本期原生开奖号码(基底核心)
         st.markdown("#### 🔴 第一层基底：本期原生开奖号码(一级核心参考)")
         l1_html = " ".join([fmt_num(n, num_status_dict) for n in sorted(pool_result["l1"])])
         st.markdown(l1_html, unsafe_allow_html=True)
 
-        # 层级2：二级相随号(同频关联，存档主体)
         st.markdown("#### 🟡 第二层候选：本期高频相随号(二级重点预测，已存档)")
         level2_groups = pool_result["l2_group"]
         if level2_groups:
@@ -1067,7 +1005,6 @@ with tab6:
         else:
             st.warning("暂无高频二级相随号数据")
 
-        # 层级3：三级跟随号(跨期传导，补充备选)
         st.markdown("#### 🟢 第三层备选：相随号衍生跟随号(三级补充预测，已存档)")
         level3_groups = pool_result["l3_group"]
         if level3_groups:
@@ -1078,21 +1015,17 @@ with tab6:
         else:
             st.warning("暂无衍生三级跟随号数据")
 
-        # ---------------------- 7. 下期选号简易参考建议(联动对比结论) ----------------------
         st.divider()
         st.subheader("💡 基于跨期对比的下期选号适配建议")
         st.success("结合两期偏移规律：优先保留二级相随号核心、搭配高遗漏回补冷号，冷热配比控制1:1；规避本期连号扎堆区间，平衡012路分布，严格控制与本期开奖重合率≤20%。")
 
-# 尾部注释：唯一性保障说明
 st.caption("🔒 技术说明：底层历史数据/核心计算逻辑未修改时，跨期对比结果、预测池号码永久固定不变，无随机变动")
 
-
-# ========== Tab7 设置页【已嵌入一键备份迁移·最终成品版】 ==========
+# ========== Tab7 设置页 ✅【修复：变量定义+路径正常】 ==========
 with tab7:
     st.header("⚙️ 数据管理、存档迁移与系统重置")
     st.info("支持外置存档独立备份、跨代码版本迁移、原始数据下载，更替代码不丢数据")
 
-    # 1. 原始开奖CSV单机备份
     st.subheader("📄 原始开奖数据单机备份")
     if os.path.exists(DATA_FILE):
         with open(DATA_FILE, "rb") as f:
@@ -1108,7 +1041,6 @@ with tab7:
         st.warning("数据文件不存在，请先初始化系统")
 
     st.divider()
-    # 2. 外置存档子文件单独下载
     st.subheader("📂 分项存档文件管理")
     if os.path.exists(SAVE_DIR):
         save_files = os.listdir(SAVE_DIR)
@@ -1122,7 +1054,6 @@ with tab7:
             st.info("暂无预测号/组合分项存档")
 
     st.divider()
-    # 3. 全局数据统计总览
     st.subheader("📈 全库数据统计看板")
     col_stat1, col_stat2, col_stat3, col_stat4 = st.columns(4)
     with col_stat1:
@@ -1134,36 +1065,29 @@ with tab7:
     with col_stat4:
         st.metric("总号码记录数", f"{total * 20}个")
 
-    # -------------------------- 【重点：一键备份/迁移 精准插入在这里】--------------------------
     st.divider()
-    # 新增：适配代码更替·外置存档一键打包迁移模块
     st.subheader("💾 全库一键打包备份 | 跨代码/跨电脑迁移专用")
-    # 动态导入压缩依赖（局部导入不污染全局，防报错）
     try:
-        import shutil
-        import zipfile
-        from datetime import datetime
-
-        # 生成带时间戳的迁移包，防止覆盖
-        zip_name = f"KL8全量外置存档_一键迁移包_{datetime.now().strftime('%Y%m%d%H%M%S')}.zip"
+        zip_name = f"KL8全量外置存档_一键迁移包_{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}.zip"
         zip_path = os.path.join(ARCHIVE_ROOT, zip_name)
 
         if st.button("📦 开始打包全部外置数据（适配代码更替/换服务器/换电脑）", use_container_width=True, type="primary"):
             with st.spinner("正在压缩全库存档，请稍候..."):
-                # 遍历整个外置存档根目录打包
                 with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
                     for root, dirs, files in os.walk(ARCHIVE_ROOT):
                         for file in files:
                             fp = os.path.join(root, file)
-                            # 压缩内保留相对路径，解压直接复原目录结构
                             arcname = os.path.relpath(fp, ARCHIVE_ROOT)
                             zipf.write(fp, arcname)
+                    for root, dirs, files in os.walk(SAVE_DIR):
+                        for file in files:
+                            fp = os.path.join(root, file)
+                            arcname = os.path.relpath(fp, SAVE_DIR)
+                            zipf.write(fp, arcname)
             st.success("✅ 打包完成！更替代码只需要复制压缩包，新环境解压配置路径即可秒读所有历史数据")
-            # 下载按钮联动
             with open(zip_path, "rb") as f:
                 st.download_button("⬇️ 下载全库迁移压缩包", f, file_name=zip_name, use_container_width=True)
 
-        # 查看全局存档索引（跨代码溯源所有期号）
         st.divider()
         st.subheader("📋 外置存档全局索引总表（全历史检索）")
         if os.path.exists(INDEX_FILE):
@@ -1173,10 +1097,8 @@ with tab7:
             st.info("暂无存档索引，生成预测号/组合后自动创建")
     except Exception as e:
         st.error(f"模块加载提示：{str(e)}，不影响主程序运行，仅迁移功能临时不可用")
-    # ----------------------------------------------------------------------------------------
 
     st.divider()
-    # 4. 危险区：系统数据重置（保持原有不动）
     st.subheader("⚠️ 数据重置终极操作（高危不可恢复）")
     st.error("此操作清空增量数据，仅恢复初始88期基准，更替代码无需点这里！")
     with st.form("reset_data_form", border=True):
@@ -1195,11 +1117,10 @@ with tab7:
             else:
                 st.error("请勾选确认框后再执行")
 
-
-# ====================== 全局尾部合规声明（语法闭合无遗漏） ======================
+# ====================== 全局尾部合规声明 ======================
 st.divider()
 st.markdown("""
 <div style="text-align:center;color:#666;font-size:14px">
 ⚠️ 本系统仅历史数据统计娱乐，彩票开奖完全随机，不构成任何购彩建议，理性购彩遵守法规
 </div>
-""", unsafe_allow_html=True)  
+""", unsafe_allow_html=True)
